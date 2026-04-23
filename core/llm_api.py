@@ -17,18 +17,14 @@ client = OpenAI(
 )
 
 
-def chat_with_llm(user_message: str, max_retries: int = 3) -> str:
+def chat_with_llm(messages: list, max_retries: int = 3) -> str:
     for attempt in range(max_retries):
         try:
-            # 打包发送 client-交流/图画-补全
             response = client.chat.completions.create(
-                model=model_name, # type: ignore
-                messages=[ # type: ignore
-                    {"role": "user", "content": user_message}
-                ],
+                model=model_name,  # type: ignore
+                messages=messages,
                 temperature=0.7
             )
-            # 请求-第0个回答（有多个）-信息内容
             content = response.choices[0].message.content
             return content or ""
 
@@ -41,4 +37,4 @@ def chat_with_llm(user_message: str, max_retries: int = 3) -> str:
             else:
                 return f"请求 API 时发生严重错误: {e}"
 
-    return "❌ 哎呀，API 服务器太拥挤了，我重试了好几次都没成功，请稍后再试吧。"
+    return "❌ 哎呀，API 服务器太拥挤了，请稍后再试吧。"
