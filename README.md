@@ -57,3 +57,9 @@ OPENAI_API_KEY="Key"
 ```bash
 python main.py
 ```
+
+## 环境导出
+
+```
+pip freeze > requirements.txt
+```
