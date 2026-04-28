@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kita-Agent 终端</title>
+    <style>
+        /* 定义日间/夜间模式的配色方案，注重可读性 */
+        :root {
+            --bg-color: #f5f6f8;
+            --chat-bg: #ffffff;
+            --text-main: #333333;
+            --text-muted: #888888;
+            --primary-color: #007bff;
+            --user-bubble: #e3f2fd;
+            --agent-bubble: #f1f3f5;
+            --border-color: #dddddd;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #121212;
+                --chat-bg: #1e1e1e;
+                --text-main: #e0e0e0;
+                --text-muted: #aaaaaa;
+                --primary-color: #3f51b5;
+                --user-bubble: #2c3e50;
+                --agent-bubble: #333333;
+                --border-color: #444444;
+            }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 800px;
+            height: 90vh;
+            background: var(--chat-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            padding: 20px;
+            background: var(--primary-color);
+            color: white;
+            text-align: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 8px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .msg-user {
+            align-self: flex-end;
+            background-color: var(--user-bubble);
+            border-bottom-right-radius: 0;
+        }
+
+        .msg-agent {
+            align-self: flex-start;
+            background-color: var(--agent-bubble);
+            border-bottom-left-radius: 0;
+            white-space: pre-wrap; /* 保持思考过程的换行格式 */
+        }
+
+        .chat-input {
+            display: flex;
+            padding: 15px;
+            border-top: 1px solid var(--border-color);
+            background: var(--chat-bg);
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-color);
+            color: var(--text-main);
+            outline: none;
+            font-size: 1rem;
+        }
+
+        .chat-input button {
+            margin-left: 10px;
+            padding: 0 20px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: opacity 0.2s;
+        }
+
+        .chat-input button:hover {
+            opacity: 0.9;
+        }
+
+        .loading {
+            align-self: flex-start;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header">Kita-Agent 终端</div>
+    <div class="chat-messages" id="chatBox">
+        <div class="message msg-agent">你好！我是 Kita，有什么我可以帮你的吗？</div>
+        <div class="loading" id="loadingTip">Kita 正在思考中...</div>
+    </div>
+    <div class="chat-input">
+        <input type="text" id="userInput" placeholder="输入你想问的问题..." onkeypress="handleEnter(event)">
+        <button onclick="sendMessage()">发送</button>
+    </div>
+</div>
+
+<script>
+    // 生成一个随机的 session_id，模拟当前用户的会话
+    const sessionId = "session-" + Math.random().toString(36).substring(2, 9);
+
+    function appendMessage(role, text) {
+        const chatBox = document.getElementById('chatBox');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message msg-${role}`;
+        msgDiv.innerText = text;
+
+        // 插入在 loading 提示之前
+        const loadingTip = document.getElementById('loadingTip');
+        chatBox.insertBefore(msgDiv, loadingTip);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    async function sendMessage() {
+        const inputEle = document.getElementById('userInput');
+        const text = inputEle.value.trim();
+        if (!text) return;
+
+        appendMessage('user', text);
+        inputEle.value = '';
+
+        const loadingTip = document.getElementById('loadingTip');
+        loadingTip.style.display = 'block';
+
+        try {
+            const response = await fetch('/api/v1/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    user_input: text
+                })
+            });
+            const resData = await response.json();
+
+            if (resData.code === "0000") {
+                appendMessage('agent', resData.data);
+            } else {
+                appendMessage('agent', `❌ 错误: ${resData.info}`);
+            }
+        } catch (error) {
+            appendMessage('agent', `❌ 网络错误: ${error}`);
+        } finally {
+            loadingTip.style.display = 'none';
+        }
+    }
+
+    function handleEnter(e) {
+        if (e.key === 'Enter') sendMessage();
+    }
+</script>
+
+</body>
+</html>
