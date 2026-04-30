@@ -5,6 +5,9 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = ""
     MODEL_NAME: str = ""
 
+    REDIS_URL: str = "redis://localhost:6379/0"
+    SESSION_TTL: int = 86400
+
     class Config:
         env_file = ".env"
 

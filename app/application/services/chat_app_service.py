@@ -1,6 +1,6 @@
 from app.domain.agent.entity import AgentEntity
 from app.domain.agent.repository import ILlmService
-from app.infrastructure.repository.memory_agent_repo import MemoryAgentRepository
+from app.infrastructure.repository.redis_agent_repo import RedisAgentRepository
 from app.domain.agent.prompt import AGENT_SYSTEM_PROMPT
 
 class ChatAppService:
@@ -9,14 +9,14 @@ class ChatAppService:
     """
     def __init__(self, llm_service: ILlmService):
         self.llm_service = llm_service
-        self.agent_repo = MemoryAgentRepository()
+        self.agent_repo = RedisAgentRepository()
 
     def do_chat(self, session_id: str, user_input: str) -> str:
         """
         执行一次完整的对话业务流
         """
         # 1. 提：从仓储中获取或创建 Agent 聚合根
-        agent = self.agent_repo.get_by_id(session_id)
+        agent = self.agent_repo.get(session_id)
         if not agent:
             agent = AgentEntity(
                 session_id=session_id,
