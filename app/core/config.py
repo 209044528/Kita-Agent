@@ -8,6 +8,17 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     SESSION_TTL: int = 86400
 
+    PG_VECTOR_HOST: str = "127.0.0.1"
+    PG_VECTOR_PORT: int = 5432
+    PG_VECTOR_USER: str = "postgres"
+    PG_VECTOR_PASSWORD: str = "postgres"
+    PG_VECTOR_DB: str = "ai-rag-knowledge"
+    PG_VECTOR_COLLECTION_NAME: str = "kita_agent_docs"
+
+    @property
+    def pg_database_url(self) -> str:
+        return f"postgresql+psycopg2://{self.PG_VECTOR_USER}:{self.PG_VECTOR_PASSWORD}@{self.PG_VECTOR_HOST}:{self.PG_VECTOR_PORT}/{self.PG_VECTOR_DB}"
+
     class Config:
         env_file = ".env"
 

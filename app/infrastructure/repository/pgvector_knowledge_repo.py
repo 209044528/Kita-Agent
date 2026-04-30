@@ -1,0 +1,48 @@
+from typing import List
+from langchain_openai import OpenAIEmbeddings
+from langchain_postgres import PGVector
+from langchain_core.documents import Document as LangchainDocument
+from langchain_community.embeddings import OllamaEmbeddings
+
+from app.core.config import settings
+from app.domain.knowledge.repository import IKnowledgeRepository, DocumentEntity
+
+
+class PgVectorKnowledgeRepository(IKnowledgeRepository):
+    def __init__(self):
+        self.embeddings = OllamaEmbeddings(
+            base_url="http://ollama:11434",
+            model="nomic-embed-text"
+        )
+        # self.embeddings = OpenAIEmbeddings(
+        #     model="text-embedding-3-small"
+        # )
+
+        # 初始化 LangChain 的 PGVector
+        self.vector_store = PGVector(
+            embeddings=self.embeddings,
+            collection_name=settings.PG_VECTOR_COLLECTION_NAME,
+            connection=settings.pg_database_url,
+            use_jsonb=True,
+        )
+
+    def add_documents(self, documents: List[DocumentEntity]) -> None:
+        # 将领域实体转换为 LangChain 文档格式
+        lc_docs = [
+            LangchainDocument(page_content=doc.content, metadata=doc.metadata)
+            for doc in documents
+        ]
+        self.vector_store.add_documents(lc_docs)
+
+    def similarity_search(self, query: str, top_k: int = 5, filter_kwargs: dict = None) -> List[DocumentEntity]:
+        # 执行相似度检索
+        lc_docs = self.vector_store.similarity_search(
+            query=query,
+            k=top_k,
+            filter=filter_kwargs
+        )
+        # 将 LangChain 文档转换回领域实体
+        return [
+            DocumentEntity(content=doc.page_content, metadata=doc.metadata)
+            for doc in lc_docs
+        ]
