@@ -60,9 +60,51 @@ OPENAI_API_KEY="Key"
 
 ## 🛠️ 快速启动
 
-运行以下命令启动 Kita-Agent：
+方式一：Docker Compose 一键启动（推荐）
 ```bash
-python main.py
+  # 1. 构建、启动所有服务
+  docker build -t kita-agent:latest .
+  # 重构单个app
+  docker-compose up -d --build app
+  docker-compose up -d
+
+  # 2. 等待 Ollama 启动后拉取 embedding 模型
+  docker exec -it kita-ollama ollama pull nomic-embed-text
+
+  # 3. 检查服务状态
+  docker-compose ps
+
+  # 4. 访问应用
+  # Web UI: http://localhost:8000
+  # API: http://localhost:8000/api/v1/chat
+  
+  
+  ## 停止容器
+  docker stop kita-agent-app
+    
+  ## 删除容器
+  docker rm kita-agent-app
+```
+
+  方式二：本地开发模式
+```bash
+  # 1. 启动依赖服务（Redis、PostgreSQL、Ollama）
+  docker-compose up -d redis db ollama
+
+  # 2. 拉取 embedding 模型
+  docker exec -it kita-ollama ollama pull nomic-embed-text
+
+  # 3. 配置 .env
+  REDIS_URL=redis://localhost:6379/0
+  PG_VECTOR_HOST=localhost
+  OLLAMA_BASE_URL=http://localhost:11434
+  
+  # 运行以下命令启动 Kita-Agent：
+  python main.py
+```
+## 查看日志
+```
+docker-compose logs app --tail=20
 ```
 
 ## 环境导出

@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.trigger.http import chat_controller
+from app.trigger.http import chat_controller, maintenance_controller, maintenance_controller
 
 app = FastAPI(
     title="Kita-Agent API",
@@ -25,8 +25,9 @@ async def health_check():
     return {"status": "ok", "message": "Kita-Agent 服务正在运行"}
 
 app.include_router(chat_controller.router, prefix="/api/v1", tags=["Agent Chat"])
+app.include_router(maintenance_controller.router, prefix="/api/v1", tags=["Maintenance"])
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
 
 if __name__ == "__main__":
     print("🚀 正在启动 Kita-Agent FastAPI 服务...")
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

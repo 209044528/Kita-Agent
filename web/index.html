@@ -5,22 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kita-Agent 终端</title>
     <style>
-        /* 定义日间/夜间模式的配色方案，注重可读性 */
         :root {
             --bg-color: #f5f6f8;
             --chat-bg: #ffffff;
+            --sidebar-bg: #f9f9f9;
+            --sidebar-hover: #ececec;
             --text-main: #333333;
             --text-muted: #888888;
             --primary-color: #007bff;
             --user-bubble: #e3f2fd;
             --agent-bubble: #f1f3f5;
             --border-color: #dddddd;
+            --sidebar-width: 260px; /* 加宽侧边栏 */
         }
 
         @media (prefers-color-scheme: dark) {
             :root {
                 --bg-color: #121212;
                 --chat-bg: #1e1e1e;
+                --sidebar-bg: #202123;
+                --sidebar-hover: #2a2b32;
                 --text-main: #e0e0e0;
                 --text-muted: #aaaaaa;
                 --primary-color: #3f51b5;
@@ -28,6 +32,10 @@
                 --agent-bubble: #333333;
                 --border-color: #444444;
             }
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
@@ -41,88 +49,230 @@
             height: 100vh;
         }
 
-        .chat-container {
+        .app-container {
             width: 100%;
-            max-width: 800px;
-            height: 90vh;
-            background: var(--chat-bg);
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            height: 100vh; /* 全屏铺满，更像主流 Web 应用 */
             display: flex;
-            flex-direction: column;
+            gap: 0;
             overflow: hidden;
         }
 
+        /* ====== 侧边栏样式 ====== */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .sidebar-top {
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            gap: 15px;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .new-chat-btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            text-align: left;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.95rem;
+            transition: background 0.2s;
+        }
+
+        .new-chat-btn:hover {
+            background: var(--sidebar-hover);
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .history-list-title {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+            padding-left: 5px;
+        }
+
+        .history-item {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            text-align: left;
+            cursor: pointer;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: background 0.2s;
+        }
+
+        .history-item:hover {
+            background: var(--sidebar-hover);
+        }
+
+        .history-item.active {
+            background: var(--sidebar-hover);
+            font-weight: 500;
+        }
+
+        .sidebar-bottom {
+            padding: 15px;
+        }
+
+        .settings-btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            text-align: left;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.95rem;
+            transition: background 0.2s;
+        }
+
+        .settings-btn:hover {
+            background: var(--sidebar-hover);
+        }
+
+        /* ====== 聊天主区域 ====== */
+        .chat-container {
+            flex: 1;
+            background: var(--chat-bg);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
         .chat-header {
-            padding: 20px;
-            background: var(--primary-color);
-            color: white;
-            text-align: center;
-            font-size: 1.2rem;
-            font-weight: bold;
+            padding: 15px 20px;
+            color: var(--text-main);
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .chat-messages {
             flex: 1;
-            padding: 20px;
+            padding: 20px 10%; /* 两侧留白，更易读 */
             overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 20px;
         }
 
         .message {
-            max-width: 80%;
-            padding: 12px 16px;
-            border-radius: 8px;
-            line-height: 1.5;
+            max-width: 85%;
+            padding: 14px 18px;
+            border-radius: 12px;
+            line-height: 1.6;
             word-wrap: break-word;
+            font-size: 1rem;
         }
 
         .msg-user {
             align-self: flex-end;
             background-color: var(--user-bubble);
-            border-bottom-right-radius: 0;
+            border-bottom-right-radius: 4px;
         }
 
         .msg-agent {
             align-self: flex-start;
             background-color: var(--agent-bubble);
-            border-bottom-left-radius: 0;
-            white-space: pre-wrap; /* 保持思考过程的换行格式 */
+            border-bottom-left-radius: 4px;
+            white-space: pre-wrap;
+        }
+
+        /* ====== 输入区域 ====== */
+        .chat-input-wrapper {
+            padding: 20px 10%;
+            background: linear-gradient(180deg, rgba(255,255,255,0) 0%, var(--chat-bg) 30%);
         }
 
         .chat-input {
             display: flex;
-            padding: 15px;
-            border-top: 1px solid var(--border-color);
-            background: var(--chat-bg);
+            align-items: center;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            background: var(--bg-color);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }
+
+        .upload-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .upload-btn:hover {
+            background: var(--sidebar-hover);
+            color: var(--primary-color);
+        }
+
+        .upload-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
         }
 
         .chat-input input {
             flex: 1;
             padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            background: var(--bg-color);
+            border: none;
+            background: transparent;
             color: var(--text-main);
             outline: none;
             font-size: 1rem;
         }
 
-        .chat-input button {
+        .chat-input button.send-btn {
             margin-left: 10px;
-            padding: 0 20px;
+            padding: 10px 20px;
             background: var(--primary-color);
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 10px;
             cursor: pointer;
             font-size: 1rem;
             transition: opacity 0.2s;
         }
 
-        .chat-input button:hover {
+        .chat-input button.send-btn:hover {
             opacity: 0.9;
         }
 
@@ -131,26 +281,372 @@
             color: var(--text-muted);
             font-size: 0.9rem;
             display: none;
+            margin-left: 10%;
         }
+
+        /* ====== 模态框样式保留原样 ====== */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: var(--chat-bg);
+            padding: 30px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .delete-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 0 5px;
+            transition: color 0.2s;
+            line-height: 1;
+        }
+        .delete-btn:hover {
+            color: #ff4d4f;
+        }
+
+        .modal-body-split {
+            display: flex;
+            gap: 30px;
+            align-items: flex-start;
+        }
+        .modal-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-col-divider {
+            width: 1px;
+            background: var(--border-color);
+            align-self: stretch;
+        }
+        #uploadModal .modal-content {
+            max-width: 900px;
+        }
+
+        .dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            bottom: 120%;
+            left: 0;
+            background-color: var(--chat-bg);
+            min-width: 160px;
+            box-shadow: 0px 8px 16px rgba(0,0,0,0.2);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            z-index: 100;
+            overflow: hidden;
+        }
+        .dropdown-content button {
+            color: var(--text-main);
+            padding: 12px 16px;
+            text-decoration: none;
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: background 0.2s;
+        }
+        .dropdown-content button:hover {
+            background-color: var(--sidebar-hover);
+            color: var(--primary-color);
+        }
+        .dropdown.show .dropdown-content {
+            display: block;
+        }
+
+        .modal-header { font-size: 1.3rem; font-weight: bold; margin-bottom: 20px; color: var(--text-main); }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: var(--text-main); font-size: 0.9rem; }
+        .form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-color); color: var(--text-main); font-size: 1rem; }
+        .form-group textarea { min-height: 150px; resize: vertical; font-family: inherit; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+        .modal-actions button { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; transition: opacity 0.2s; }
+        .btn-cancel { background: var(--border-color); color: var(--text-main); }
+        .btn-submit { background: var(--primary-color); color: white; }
+        .data-section { margin-bottom: 25px; }
+        .data-section h3 { margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.1rem; }
+        .data-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
+        .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        .data-table th { background: var(--bg-color); font-weight: 600; }
+        .empty-state { text-align: center; color: var(--text-muted); padding: 20px; }
+        .stat-card { background: var(--bg-color); padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        .stat-card h4 { margin: 0 0 10px 0; color: var(--text-main); font-size: 0.95rem; }
+        .stat-value { font-size: 1.5rem; font-weight: bold; color: var(--primary-color); }
     </style>
 </head>
 <body>
 
-<div class="chat-container">
-    <div class="chat-header">Kita-Agent 终端</div>
-    <div class="chat-messages" id="chatBox">
-        <div class="message msg-agent">你好！我是 Kita，有什么我可以帮你的吗？</div>
-        <div class="loading" id="loadingTip">Kita 正在思考中...</div>
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-top">
+            <button class="new-chat-btn" onclick="startNewChat()">
+                <span>+ 新对话</span>
+                <span style="color: var(--text-muted);">Cmd+K</span>
+            </button>
+
+            <div class="history-list">
+                <div class="history-list-title">最近的对话</div>
+                <div id="sessionList">
+                    <div class="empty-state" style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">加载中...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar-bottom">
+            <button class="settings-btn" onclick="showMaintenanceModal()" title="系统维护">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                系统与控制台
+            </button>
+        </div>
     </div>
-    <div class="chat-input">
-        <input type="text" id="userInput" placeholder="输入你想问的问题..." onkeypress="handleEnter(event)">
-        <button onclick="sendMessage()">发送</button>
+
+    <div class="chat-container">
+        <div class="chat-header">
+            <div>Kita-Agent 终端</div>
+            <div style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">模型: Default (GPT/GLM)</div>
+        </div>
+
+        <div class="chat-messages" id="chatBox">
+            <div class="message msg-agent">你好！我是 Kita，是一个具备逻辑思考能力的智能 AI 助手。有什么我可以帮你的吗？</div>
+        </div>
+        <div class="loading" id="loadingTip">Kita 正在思考中...</div>
+
+        <div class="chat-input-wrapper">
+            <div class="chat-input">
+                <div class="dropdown" id="plusDropdown">
+                    <button class="upload-btn" onclick="toggleDropdown(event)" title="更多操作">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    <div class="dropdown-content">
+                        <button onclick="openUploadModal()">📂 上传知识库</button>
+                        <button onclick="openPromptModal()">🌟 修改提示词</button>
+                    </div>
+                </div>
+                <input type="text" id="userInput" placeholder="输入你想问的问题..." onkeypress="handleEnter(event)">
+                <button class="send-btn" onclick="sendMessage()">发送</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="uploadModal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">📂 上传知识库</div>
+        <div class="form-group">
+            <label>知识标签 *</label>
+            <input type="text" id="knowledgeTag" placeholder="例如: python_docs" required>
+        </div>
+        <div class="form-group">
+            <label>来源名称</label>
+            <input type="text" id="sourceName" placeholder="例如: 官方文档">
+        </div>
+        <div class="form-group">
+            <label>知识内容 *</label>
+            <textarea id="knowledgeText" placeholder="输入知识库文本..." style="min-height: 150px;"></textarea>
+        </div>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closeUploadModal()">取消</button>
+            <button class="btn-submit" onclick="uploadKnowledge()">上传</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="promptModal">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">🌟 修改提示词</div>
+        <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:15px;">
+            定义 AI 的角色身份。系统会自动在底层补齐工具调用的规则。
+        </p>
+        <div class="form-group">
+            <textarea id="systemPromptInput" style="min-height: 200px; font-family: monospace; font-size: 0.95rem;"></textarea>
+        </div>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closePromptModal()">取消</button>
+            <button class="btn-submit" onclick="saveSystemPrompt()">保存</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="maintenanceModal">
+    <div class="modal-content">
+        <div class="modal-header">系统维护</div>
+
+        <div class="data-section">
+            <h3>📊 知识库统计</h3>
+            <div id="knowledgeStats">加载中...</div>
+        </div>
+
+        <div class="data-section">
+            <h3>💬 Redis 会话</h3>
+            <div id="redisData">加载中...</div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closeMaintenanceModal()">关闭</button>
+            <button class="btn-submit" onclick="refreshMaintenanceData()">刷新</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="infoModal">
+    <div class="modal-content" style="max-width: 400px; text-align: center;">
+        <div class="modal-header" id="infoTitle">提示</div>
+        <div id="infoMessage" style="margin-bottom: 25px; color: var(--text-main); line-height: 1.5;"></div>
+        <div class="modal-actions" style="justify-content: center; gap: 15px;">
+            <button class="btn-cancel" id="infoCancelBtn" onclick="closeInfoModal()">取消</button>
+            <button class="btn-submit" id="infoConfirmBtn" style="min-width: 80px;">确定</button>
+        </div>
     </div>
 </div>
 
 <script>
-    // 生成一个随机的 session_id，模拟当前用户的会话
-    const sessionId = "session-" + Math.random().toString(36).substring(2, 9);
+    // 从 localStorage 恢复会话 ID，如果没有则生成新的
+    let sessionId = localStorage.getItem('currentSessionId') || "session-" + Math.random().toString(36).substring(2, 9);
+    localStorage.setItem('currentSessionId', sessionId);
+
+    async function loadHistorySessions() {
+        const container = document.getElementById('sessionList');
+
+        try {
+            const response = await fetch('/api/v1/sessions');
+            const resData = await response.json();
+
+            if (resData.code === "0000" && resData.data.length > 0) {
+                const sessions = resData.data;
+                let html = '';
+
+                sessions.forEach(id => {
+                    const isActive = id === sessionId ? 'active' : '';
+                    const displayId = id.length > 20 ? id.substring(0, 20) + '...' : id;
+                    html += `<button class="history-item ${isActive}" onclick="switchSession('${id}')">${displayId}</button>`;
+                });
+
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<div class="empty-state" style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">暂无历史会话</div>';
+            }
+        } catch (error) {
+            container.innerHTML = '<div class="empty-state" style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">加载失败</div>';
+        }
+    }
+
+    function cleanMessageContent(content, role) {
+        if (role === 'user') {
+            // 提取用户的原始问题
+            const userQuestionMatch = content.match(/\[User Question\]\s*(.+?)$/s);
+            if (userQuestionMatch) {
+                return userQuestionMatch[1].trim();
+            }
+            // 如果没有 [User Question] 标记，返回原内容
+            return content;
+        } else if (role === 'assistant') {
+            // 提取 Action: Finish[...] 中的最终答案
+            // 使用贪婪匹配并从末尾匹配最后一个 ]
+            const finishMatch = content.match(/Action:\s*Finish\[([\s\S]*)\]$/);
+            if (finishMatch) {
+                return finishMatch[1].trim();
+            }
+            // 如果没有 Action: Finish，返回原内容
+            return content;
+        }
+        return content;
+    }
+
+    async function switchSession(id) {
+        sessionId = id;
+        localStorage.setItem('currentSessionId', id);
+
+        const chatBox = document.getElementById('chatBox');
+        chatBox.innerHTML = `<div class="message msg-agent">正在加载历史会话...</div>`;
+
+        try {
+            const response = await fetch(`/api/v1/session/${id}`);
+            const result = await response.json();
+
+            if (result.code === "0000" && result.data) {
+                chatBox.innerHTML = '';
+
+                const messages = result.data.messages || [];
+
+                // 显示历史消息，跳过 system 消息和 Observation 消息
+                messages.forEach(msg => {
+                    if (msg.role !== 'system' && !msg.content.startsWith('Observation:')) {
+                        const cleanedContent = cleanMessageContent(msg.content, msg.role);
+                        const msgDiv = document.createElement('div');
+                        msgDiv.className = `message msg-${msg.role}`;
+                        msgDiv.innerText = cleanedContent;
+                        chatBox.appendChild(msgDiv);
+                    }
+                });
+
+                // 如果没有用户消息，显示提示
+                if (messages.filter(m => m.role !== 'system').length === 0) {
+                    chatBox.innerHTML = `<div class="message msg-agent">已切换至历史会话：${id}（暂无对话记录）</div>`;
+                }
+            } else {
+                chatBox.innerHTML = `<div class="message msg-agent">加载失败：${result.info || '会话不存在'}</div>`;
+            }
+        } catch (error) {
+            chatBox.innerHTML = `<div class="message msg-agent">加载失败：${error.message}</div>`;
+        }
+
+        chatBox.scrollTop = chatBox.scrollHeight;
+        loadHistorySessions();
+    }
+
+    function startNewChat() {
+        sessionId = "session-" + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem('currentSessionId', sessionId);
+        document.getElementById('chatBox').innerHTML = '<div class="message msg-agent">你好！我是 Kita，已开启全新对话。有什么我可以帮你的吗？</div>';
+        loadHistorySessions();
+    }
+
+    async function loadCurrentSession() {
+        const response = await fetch('/api/v1/sessions');
+        const result = await response.json();
+
+        if (result.code === "0000" && result.data && result.data.includes(sessionId)) {
+            await switchSession(sessionId);
+        } else {
+            document.getElementById('chatBox').innerHTML = '<div class="message msg-agent">你好！我是 Kita，有什么我可以帮你的吗？</div>';
+        }
+    }
+
+    window.onload = async function() {
+        await loadHistorySessions();
+        await loadCurrentSession();
+    };
 
     function appendMessage(role, text) {
         const chatBox = document.getElementById('chatBox');
@@ -158,16 +654,23 @@
         msgDiv.className = `message msg-${role}`;
         msgDiv.innerText = text;
 
-        // 插入在 loading 提示之前
-        const loadingTip = document.getElementById('loadingTip');
-        chatBox.insertBefore(msgDiv, loadingTip);
+        chatBox.appendChild(msgDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    let currentSystemPrompt = `你叫 Kita，是一个具备逻辑思考能力的智能 AI 助手。`;
+
+    function showUploadModal() {
+        document.getElementById('systemPromptInput').value = currentSystemPrompt;
+        document.getElementById('uploadModal').style.display = 'flex';
     }
 
     async function sendMessage() {
         const inputEle = document.getElementById('userInput');
         const text = inputEle.value.trim();
         if (!text) return;
+
+        currentSystemPrompt = document.getElementById('systemPromptInput').value.trim();
 
         appendMessage('user', text);
         inputEle.value = '';
@@ -181,13 +684,15 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     session_id: sessionId,
-                    user_input: text
+                    user_input: text,
+                    system_prompt: currentSystemPrompt
                 })
             });
             const resData = await response.json();
 
             if (resData.code === "0000") {
                 appendMessage('agent', resData.data);
+                loadHistorySessions();
             } else {
                 appendMessage('agent', `❌ 错误: ${resData.info}`);
             }
@@ -201,6 +706,283 @@
     function handleEnter(e) {
         if (e.key === 'Enter') sendMessage();
     }
+
+    function closeUploadModal() {
+        document.getElementById('uploadModal').style.display = 'none';
+        document.getElementById('knowledgeTag').value = '';
+        document.getElementById('sourceName').value = '';
+        document.getElementById('knowledgeText').value = '';
+    }
+
+    async function uploadKnowledge() {
+        const tag = document.getElementById('knowledgeTag').value.trim();
+        const sourceName = document.getElementById('sourceName').value.trim();
+        const text = document.getElementById('knowledgeText').value.trim();
+
+        if (!tag || !text) {
+            showInfoModal('提示', '请填写知识标签和知识内容');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/v1/knowledge/upsert', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tag: tag, source_name: sourceName || '用户上传', raw_text: text })
+            });
+            const resData = await response.json();
+
+            if (resData.code === "0000") {
+                showInfoModal('成功', '知识库上传成功！', false, () => {
+                    closeUploadModal();
+                });
+            } else {
+                showInfoModal('失败', `上传失败: ${resData.info}`);
+            }
+        } catch (error) {
+            showInfoModal('错误', `网络错误: ${error}`);
+        }
+    }
+
+    async function showMaintenanceModal() {
+        document.getElementById('maintenanceModal').style.display = 'flex';
+        await refreshMaintenanceData();
+    }
+
+    function closeMaintenanceModal() {
+        document.getElementById('maintenanceModal').style.display = 'none';
+    }
+
+    async function refreshMaintenanceData() {
+        await Promise.all([loadKnowledgeStats(), loadRedisData()]);
+    }
+
+    async function loadKnowledgeStats() {
+        const container = document.getElementById('knowledgeStats');
+        container.innerHTML = '加载中...';
+
+        try {
+            const response = await fetch('/api/v1/maintenance/knowledge');
+            const resData = await response.json();
+
+            if (resData.code === "0000") {
+                const data = resData.data;
+                let html = '';
+
+                html += `<div class="stat-card">
+                    <h4>总文档数</h4>
+                    <div class="stat-value">${data.total_docs}</div>
+                </div>`;
+
+                if (data.tag_stats && data.tag_stats.length > 0) {
+                    html += '<table class="data-table"><thead><tr><th>标签</th><th>文档数</th><th>操作</th></tr></thead><tbody>';
+                    data.tag_stats.forEach(stat => {
+                        const tagName = stat.tag || 'N/A';
+                        const deleteAction = tagName !== 'N/A'
+                            ? `<button class="delete-btn" onclick="deleteKnowledgeTag('${tagName}')" title="删除此标签的所有文档">&times;</button>`
+                            : '';
+
+                        html += `<tr>
+                            <td>${tagName}</td>
+                            <td>${stat.count}</td>
+                            <td>${deleteAction}</td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                if (data.documents && data.documents.length > 0) {
+                    html += '<h4 style="margin-top: 20px;">最近文档</h4>';
+                    html += '<table class="data-table"><thead><tr><th>内容预览</th><th>标签</th><th>来源</th></tr></thead><tbody>';
+                    data.documents.slice(0, 10).forEach(doc => {
+                        html += `<tr><td>${doc.content}</td><td>${doc.tag}</td><td>${doc.source}</td></tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+
+                container.innerHTML = html || '<div class="empty-state">暂无数据</div>';
+            } else {
+                container.innerHTML = `<div class="empty-state">加载失败: ${resData.info}</div>`;
+            }
+        } catch (error) {
+            container.innerHTML = `<div class="empty-state">网络错误: ${error}</div>`;
+        }
+    }
+
+    async function loadRedisData() {
+        const container = document.getElementById('redisData');
+        container.innerHTML = '加载中...';
+
+        try {
+            const response = await fetch('/api/v1/maintenance/redis');
+            const resData = await response.json();
+
+            if (resData.code === "0000") {
+                const sessions = resData.data;
+                let html = '';
+
+                if (sessions.length > 0) {
+                    html += `<div class="stat-card">
+                        <h4>活跃会话数</h4>
+                        <div class="stat-value">${sessions.length}</div>
+                    </div>`;
+
+                    html += '<table class="data-table"><thead><tr><th>Session ID</th><th>消息数</th><th>TTL (秒)</th></tr></thead><tbody>';
+                    sessions.forEach(session => {
+                        const hours = Math.floor(session.ttl / 3600);
+                        const minutes = Math.floor((session.ttl % 3600) / 60);
+                        html += `<tr>
+                            <td>${session.session_id}</td>
+                            <td>${session.message_count}</td>
+                            <td>${hours}h ${minutes}m</td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                } else {
+                    html = '<div class="empty-state">暂无活跃会话</div>';
+                }
+
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = `<div class="empty-state">加载失败: ${resData.info}</div>`;
+            }
+        } catch (error) {
+            container.innerHTML = `<div class="empty-state">网络错误: ${error}</div>`;
+        }
+    }
+
+    function deleteKnowledgeTag(tag) {
+        showInfoModal('确认删除', `确定要删除标签为 "${tag}" 的所有知识文档吗？此操作不可恢复。`, true, async () => {
+            try {
+                const response = await fetch('/api/v1/knowledge/delete', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tag: tag })
+                });
+                const resData = await response.json();
+
+                if (resData.code === "0000") {
+                    showInfoModal('成功', `标签 "${tag}" 已成功删除，共清理了 ${resData.data} 个文档。`, false, () => {
+                        refreshMaintenanceData();
+                    });
+                } else {
+                    showInfoModal('失败', `删除失败: ${resData.info}`);
+                }
+            } catch (error) {
+                showInfoModal('错误', `网络错误: ${error}`);
+            }
+        });
+    }
+
+    let infoCallback = null;
+
+    /**
+     * 显示自定义模态框
+     * @param {string} title 标题
+     * @param {string} message 内容
+     * @param {boolean} isConfirm 是否为确认框（显示取消按钮）
+     * @param {function} callback 点击确定后的回调
+     */
+    function showInfoModal(title, message, isConfirm = false, callback = null) {
+        document.getElementById('infoTitle').innerText = title;
+        document.getElementById('infoMessage').innerText = message;
+
+        const cancelBtn = document.getElementById('infoCancelBtn');
+        const confirmBtn = document.getElementById('infoConfirmBtn');
+
+        cancelBtn.style.display = isConfirm ? 'inline-block' : 'none';
+        infoCallback = callback;
+
+        confirmBtn.onclick = function() {
+            closeInfoModal();
+            if (infoCallback) infoCallback();
+        };
+
+        document.getElementById('infoModal').style.display = 'flex';
+    }
+
+    function closeInfoModal() {
+        document.getElementById('infoModal').style.display = 'none';
+    }
+
+    function toggleDropdown(event) {
+        event.stopPropagation();
+        document.getElementById("plusDropdown").classList.toggle("show");
+    }
+
+    window.onclick = function(event) {
+        if (!event.target.closest('.dropdown')) {
+            const dropdown = document.getElementById("plusDropdown");
+            if (dropdown && dropdown.classList.contains('show')) {
+                dropdown.classList.remove('show');
+            }
+        }
+    }
+
+    function openUploadModal() {
+        document.getElementById("plusDropdown").classList.remove("show");
+        document.getElementById('uploadModal').style.display = 'flex';
+    }
+
+    function closeUploadModal() {
+        document.getElementById('uploadModal').style.display = 'none';
+    }
+
+    async function openPromptModal() {
+        document.getElementById("plusDropdown").classList.remove("show");
+        const promptInput = document.getElementById('systemPromptInput');
+
+        try {
+            promptInput.value = '加载中...';
+            document.getElementById('promptModal').style.display = 'flex';
+
+            const res = await fetch(`/api/v1/prompt?session_id=${sessionId}`);
+            const data = await res.json();
+
+            if (data.code === "0000" && data.data) {
+                promptInput.value = data.data;
+            } else {
+                promptInput.value = "你叫 Kita，是一个具备逻辑思考能力的智能 AI 助手。"; // 默认值
+            }
+        } catch(e) {
+            promptInput.value = "你叫 Kita，是一个具备逻辑思考能力的智能 AI 助手。";
+        }
+    }
+
+    function closePromptModal() {
+        document.getElementById('promptModal').style.display = 'none';
+    }
+
+    async function saveSystemPrompt() {
+        const promptText = document.getElementById('systemPromptInput').value.trim();
+        if (!promptText) {
+            showInfoModal('提示', '提示词不能为空！');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/v1/prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    system_prompt: promptText
+                })
+            });
+            const resData = await response.json();
+
+            if (resData.code === "0000") {
+                showInfoModal('成功', '提示词已成功保存至 Redis，24小时内有效！', false, () => {
+                    closePromptModal();
+                });
+            } else {
+                showInfoModal('失败', `保存失败: ${resData.info}`);
+            }
+        } catch(error) {
+            showInfoModal('错误', `网络错误: ${error}`);
+        }
+    }
+
 </script>
 
 </body>

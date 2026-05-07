@@ -15,7 +15,7 @@ class RedisAgentRepository:
     def get(self, session_id: str) -> AgentEntity | None:
         """从 Redis 获取 Agent 实体"""
         data = self.client.get(self._get_key(session_id))
-        if data:
+        if data and data.strip():
             # 利用 Pydantic 的能力直接从 JSON 重建实体
             return AgentEntity.model_validate_json(data)
         return None
@@ -36,3 +36,20 @@ class RedisAgentRepository:
     def delete(self, session_id: str) -> None:
         """可选：手动清理会话"""
         self.client.delete(self._get_key(session_id))
+
+    def list_sessions(self) -> list[str]:
+        """获取所有会话 ID 列表"""
+        keys = self.client.keys("kita:agent:session:*")
+        return [k.split(":")[-1] for k in keys]
+
+    def save_prompt(self, session_id: str, prompt: str) -> None:
+        """保存自定义提示词到 Redis，默认 24 小时 (86400秒) 过期"""
+        self.client.setex(
+            name=f"kita:prompt:{session_id}",
+            time=86400,  # 24小时
+            value=prompt
+        )
+
+    def get_prompt(self, session_id: str) -> str | None:
+        """从 Redis 获取该会话的自定义提示词"""
+        return self.client.get(f"kita:prompt:{session_id}")

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     PG_VECTOR_DB: str = "ai-rag-knowledge"
     PG_VECTOR_COLLECTION_NAME: str = "kita_agent_docs"
 
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
+
     @property
     def pg_database_url(self) -> str:
         return f"postgresql+psycopg2://{self.PG_VECTOR_USER}:{self.PG_VECTOR_PASSWORD}@{self.PG_VECTOR_HOST}:{self.PG_VECTOR_PORT}/{self.PG_VECTOR_DB}"

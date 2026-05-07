@@ -11,8 +11,8 @@ from app.domain.knowledge.repository import IKnowledgeRepository, DocumentEntity
 class PgVectorKnowledgeRepository(IKnowledgeRepository):
     def __init__(self):
         self.embeddings = OllamaEmbeddings(
-            base_url="http://ollama:11434",
-            model="nomic-embed-text"
+            base_url=settings.OLLAMA_BASE_URL,
+            model=settings.OLLAMA_EMBEDDING_MODEL
         )
         # self.embeddings = OpenAIEmbeddings(
         #     model="text-embedding-3-small"
@@ -46,3 +46,22 @@ class PgVectorKnowledgeRepository(IKnowledgeRepository):
             DocumentEntity(content=doc.page_content, metadata=doc.metadata)
             for doc in lc_docs
         ]
+
+    def delete_by_tag(self, tag: str) -> int:
+        from sqlalchemy import text
+
+        # 直接使用 SQL 删除指定 tag 的文档
+        with self.vector_store._make_sync_session() as session:
+            result = session.execute(
+                text(f"""
+                    DELETE FROM langchain_pg_embedding
+                    WHERE collection_id = (
+                        SELECT uuid FROM langchain_pg_collection
+                        WHERE name = :collection_name
+                    )
+                    AND cmetadata->>'knowledge_tag' = :tag
+                """),
+                {"collection_name": settings.PG_VECTOR_COLLECTION_NAME, "tag": tag}
+            )
+            session.commit()
+            return result.rowcount

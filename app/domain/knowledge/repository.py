@@ -22,3 +22,8 @@ class IKnowledgeRepository(ABC):
     def similarity_search(self, query: str, top_k: int = 5, filter_kwargs: dict = None) -> List[DocumentEntity]:
         """根据 query 检索最相似的文档"""
         pass
+
+    @abstractmethod
+    def delete_by_tag(self, tag: str) -> int:
+        """根据 tag 删除知识库中的文档，返回删除的文档数量"""
+        pass

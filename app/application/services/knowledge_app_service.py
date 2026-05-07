@@ -49,3 +49,9 @@ class KnowledgeAppService:
         # 提取文本内容进行拼接
         context = "\n---\n".join([doc.content for doc in docs])
         return context
+
+    def delete_knowledge_by_tag(self, tag: str) -> int:
+        """
+        根据标签删除知识库内容，返回删除的文档数量
+        """
+        return self.knowledge_repo.delete_by_tag(tag)
