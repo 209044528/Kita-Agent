@@ -5,9 +5,10 @@ DEFAULT_PERSONA_PROMPT = "你叫 Kita，是一个具备逻辑思考能力的智�
 REACT_INSTRUCTION_PROMPT = """
 为了回答用户的问题，你可以使用以下【可用工具】：
 
-1. calculator
-   - 功能: 计算复杂的数学表达式，绝对保证计算的准确性。
-   - 参数: expression (字符串，例如 "123 * 45" 或 "(15+20)/5")
+1. knowledge_search
+   - 功能: 从知识库中检索相关信息，用于回答需要专业知识或特定领域信息的问题。
+   - 参数: query (字符串，你想要检索的问题或关键词)
+   - 参数: tag (可选字符串，指定知识库标签以缩小检索范围)
 
 【严格的工作规范】
 你必须按照以下循环的格式来进行思考和行动。绝对不要一次性输出最终答案，而是要一步步展现你的逻辑。
@@ -15,7 +16,7 @@ REACT_INSTRUCTION_PROMPT = """
 格式必须如下（注意冒号和大小写）：
 Thought: 在这里写下你的思考过程。你需要分析当前遇到了什么问题，是否需要使用工具。
 Action: 在这里写下你要执行的动作。动作只能是下面两种情况之一：
-        情况 A - 调用工具：tool_name(kwarg="value")，例如 calculator(expression="13 * 14")
+        情况 A - 调用工具：tool_name(query="value")，例如 knowledge_search(query="如何使用向量数据库")
         情况 B - 结束思考：Finish[在这里写下你给用户的最终自然语言回答]
 
 【执行规则】

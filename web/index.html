@@ -524,6 +524,33 @@
     </div>
 </div>
 
+<div class="modal" id="renameModal">
+    <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-header">重命名对话</div>
+        <div class="form-group">
+            <label>对话名称</label>
+            <input type="text" id="renameInput" placeholder="请输入新的对话名称">
+        </div>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closeRenameModal()">取消</button>
+            <button class="btn-submit" onclick="confirmRename()">确定</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="deleteModal">
+    <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-header">删除对话</div>
+        <div style="margin-bottom: 25px; color: var(--text-main); line-height: 1.5;">
+            确定要删除这段对话吗？此操作不可恢复。
+        </div>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closeDeleteModal()">取消</button>
+            <button class="btn-submit" onclick="confirmDelete()" style="background: #ff4d4f;">删除</button>
+        </div>
+    </div>
+</div>
+
 <script>
     let sessionId = "";
 
@@ -740,38 +767,94 @@
         if (e.key === 'Enter') sendMessage();
     }
 
+    // 重命名模态框回车确认
+    document.addEventListener('DOMContentLoaded', function() {
+        const renameInput = document.getElementById('renameInput');
+        if (renameInput) {
+            renameInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') confirmRename();
+            });
+        }
+    });
+
     /* ====== 侧边栏对话管理操作 ====== */
 
+    let pendingDeleteSessionId = null;
+    let pendingRenameSessionId = null;
+    let pendingRenameOldTitle = null;
+
     // 删除历史会话
-    async function deleteSessionConfirm(id) {
-        if (confirm("确定要删除这段对话吗？")) {
-            try {
-                await fetch(`/api/v1/session/${id}`, { method: 'DELETE' });
-                if (id === sessionId) {
-                    startNewChat();
-                } else {
-                    loadHistorySessions();
-                }
-            } catch (e) {
-                console.error("删除失败", e);
+    function deleteSessionConfirm(id) {
+        pendingDeleteSessionId = id;
+        document.getElementById('deleteModal').style.display = 'flex';
+    }
+
+    function closeDeleteModal() {
+        document.getElementById('deleteModal').style.display = 'none';
+        pendingDeleteSessionId = null;
+    }
+
+    async function confirmDelete() {
+        if (!pendingDeleteSessionId) return;
+
+        try {
+            await fetch(`/api/v1/session/${pendingDeleteSessionId}`, { method: 'DELETE' });
+            if (pendingDeleteSessionId === sessionId) {
+                startNewChat();
+            } else {
+                loadHistorySessions();
             }
+            closeDeleteModal();
+        } catch (e) {
+            console.error("删除失败", e);
+            showInfoModal('错误', '删除失败，请稍后重试');
         }
     }
 
     // 重命名历史会话
-    async function renameSessionPrompt(id, oldTitle) {
-        const newTitle = prompt("请输入新的对话名称：", oldTitle);
-        if (newTitle && newTitle.trim() !== "" && newTitle !== oldTitle) {
-            try {
-                await fetch('/api/v1/session/rename', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ session_id: id, title: newTitle.trim() })
-                });
-                loadHistorySessions();
-            } catch (e) {
-                console.error("重命名失败", e);
-            }
+    function renameSessionPrompt(id, oldTitle) {
+        pendingRenameSessionId = id;
+        pendingRenameOldTitle = oldTitle;
+        document.getElementById('renameInput').value = oldTitle;
+        document.getElementById('renameModal').style.display = 'flex';
+        setTimeout(() => {
+            document.getElementById('renameInput').focus();
+            document.getElementById('renameInput').select();
+        }, 100);
+    }
+
+    function closeRenameModal() {
+        document.getElementById('renameModal').style.display = 'none';
+        pendingRenameSessionId = null;
+        pendingRenameOldTitle = null;
+        document.getElementById('renameInput').value = '';
+    }
+
+    async function confirmRename() {
+        if (!pendingRenameSessionId) return;
+
+        const newTitle = document.getElementById('renameInput').value.trim();
+        if (!newTitle) {
+            showInfoModal('提示', '对话名称不能为空');
+            return;
+        }
+
+        if (newTitle === pendingRenameOldTitle) {
+            closeRenameModal();
+            return;
+        }
+
+        try {
+            await fetch('/api/v1/session/rename', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: pendingRenameSessionId, title: newTitle })
+            });
+            loadHistorySessions();
+            closeRenameModal();
+        } catch (e) {
+            console.error("重命名失败", e);
+            showInfoModal('错误', '重命名失败，请稍后重试');
         }
     }
 

@@ -49,7 +49,7 @@ class ChatAppService:
                 )
 
         # 3. 执行对话
-        reply = agent.process_chat(prompt_input, self.llm_service, original_user_input=original_input)
+        reply = agent.process_chat(prompt_input, self.llm_service, original_user_input=original_input, knowledge_service=self.knowledge_service)
 
         if not agent.title:
             summary_prompt = [{"role": "user",

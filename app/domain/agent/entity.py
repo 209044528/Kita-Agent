@@ -19,13 +19,14 @@ class AgentEntity(BaseModel):
         if self.system_prompt and not self.messages:
             self.messages.append({"role": "system", "content": self.system_prompt})
 
-    def process_chat(self, user_input: str, llm_service: ILlmService, original_user_input: str | None = None) -> str:
+    def process_chat(self, user_input: str, llm_service: ILlmService, original_user_input: str | None = None, knowledge_service=None) -> str:
         """
         处理对话，支持 RAG 增强的输入
 
         Args:
             user_input: 实际发送给 LLM 的输入（可能包含 RAG 上下文）
             original_user_input: 用户的原始问题（用于存储到历史记录）
+            knowledge_service: 知识库服务实例，用于工具调用时检索知识
         """
         # 存储用户的原始问题到历史记录
         display_input = original_user_input if original_user_input else user_input
@@ -58,11 +59,18 @@ class AgentEntity(BaseModel):
                 tool_name = tool_match.group(1)
                 args_str = tool_match.group(2)
 
-                arg_value_match = re.search(r'="?([^"]*)"?', args_str)
-                arg_value = arg_value_match.group(1) if arg_value_match else args_str
+                # 解析参数（支持 query 和 tag）
+                tool_args = {}
+                query_match = re.search(r'query\s*=\s*"([^"]*)"', args_str)
+                tag_match = re.search(r'tag\s*=\s*"([^"]*)"', args_str)
 
-                observation_result = self._execute_tool(tool_name, arg_value)
-                print(f"🔧 [工具执行]: 调用 {tool_name}, 参数: {arg_value}, 结果: {observation_result}")
+                if query_match:
+                    tool_args['query'] = query_match.group(1)
+                if tag_match:
+                    tool_args['tag'] = tag_match.group(1)
+
+                observation_result = self._execute_tool(tool_name, tool_args, knowledge_service)
+                print(f"🔧 [工具执行]: 调用 {tool_name}, 参数: {tool_args}, 结果: {observation_result}")
 
                 working_messages.append({"role": "user", "content": f"Observation: {observation_result}"})
                 continue
@@ -75,16 +83,26 @@ class AgentEntity(BaseModel):
         self.messages.append({"role": "assistant", "content": error_msg})
         return error_msg
 
-    def _execute_tool(self, tool_name: str, arg_value: str) -> str:
+    def _execute_tool(self, tool_name: str, tool_args: dict, knowledge_service=None) -> str:
         """
         内部工具执行器。
         """
-        if tool_name == "calculator":
+        if tool_name == "knowledge_search":
+            if not knowledge_service:
+                return "错误: 知识库服务未初始化，无法执行检索。"
+
+            query = tool_args.get('query')
+            if not query:
+                return "错误: 缺少必需参数 query。"
+
+            tag = tool_args.get('tag')
+
             try:
-                # ⚠️ 注意：生产环境禁止直接 eval
-                result = eval(arg_value)
-                return str(result)
+                result = knowledge_service.retrieve_knowledge(query, tag)
+                if not result or result.strip() == "":
+                    return "未找到相关知识，请尝试其他关键词或直接回答用户问题。"
+                return result
             except Exception as e:
-                return f"计算错误，请检查表达式格式: {e}"
+                return f"知识库检索错误: {e}"
 
         return f"错误: 找不到名为 '{tool_name}' 的工具。"
