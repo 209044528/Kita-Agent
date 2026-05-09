@@ -10,6 +10,7 @@ class AgentEntity(BaseModel):
     自带 ReAct 推理循环逻辑。
     """
     session_id: str
+    title: str = ""
     system_prompt: str = ""
     messages: List[Dict[str, str]] = Field(default_factory=list)
 

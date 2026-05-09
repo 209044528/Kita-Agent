@@ -51,6 +51,15 @@ class ChatAppService:
         # 3. 执行对话
         reply = agent.process_chat(prompt_input, self.llm_service, original_user_input=original_input)
 
+        if not agent.title:
+            summary_prompt = [{"role": "user",
+                               "content": f"请为以下对话起一个极其简短的标题（不超过10个字）：\n用户：{original_input}\n助手：{reply}"}]
+            try:
+                title_gen = self.llm_service.generate_reply(summary_prompt)
+                agent.title = title_gen.strip().replace("“", "").replace("”", "")
+            except:
+                agent.title = original_input[:15] + ("..." if len(original_input) > 15 else "")
+
         # 4. 存回仓储
         self.agent_repo.save(agent)
 

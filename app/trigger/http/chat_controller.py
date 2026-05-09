@@ -9,6 +9,7 @@ from app.infrastructure.llm.openai_client import OpenAILlmServiceImpl
 from app.infrastructure.repository.pgvector_knowledge_repo import PgVectorKnowledgeRepository
 from app.infrastructure.repository.redis_agent_repo import RedisAgentRepository
 from pydantic import BaseModel, Field
+from typing import Dict
 
 router = APIRouter()
 
@@ -41,14 +42,35 @@ def delete_knowledge(request: KnowledgeDeleteRequestDTO):
         return Response.error(code="500", info=str(e))
 
 
-@router.get("/sessions", response_model=Response[list[str]])
+@router.get("/sessions", response_model=Response[list[dict]])
 def get_all_sessions():
     try:
-        sessions = agent_repo.list_sessions()
+        session_ids = agent_repo.list_sessions()
+        sessions = []
+        for session_id in session_ids:
+            agent = agent_repo.get(session_id)
+            if agent:
+                sessions.append({
+                    "id": agent.session_id,
+                    "title": agent.title or "未归档对话"
+                })
         return Response.success(data=sessions)
     except Exception as e:
         return Response.error(code="500", info=str(e))
 
+@router.post("/session/rename")
+def rename_session(request: Dict[str, str]):
+    agent = agent_repo.get(request['session_id'])
+    if agent:
+        agent.title = request['title']
+        agent_repo.save(agent)
+        return Response.success(data=True)
+    return Response.error(code="404", info="未找到会话")
+
+@router.delete("/session/{session_id}")
+def delete_session(session_id: str):
+    agent_repo.delete(session_id)
+    return Response.success(data=True)
 
 @router.get("/session/{session_id}", response_model=Response[dict])
 def get_session_history(session_id: str):
