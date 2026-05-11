@@ -53,6 +53,13 @@ class AgentEntity(BaseModel):
                 self.messages.append({"role": "assistant", "content": final_answer})
                 return final_answer
 
+            elif re.search(r"Action:\s*Finish", reply, re.IGNORECASE):
+                parts = re.split(r"Action:\s*Finish", reply, flags=re.IGNORECASE)
+                final_answer = parts[-1].replace("]", "").strip()
+
+                self.messages.append({"role": "assistant", "content": final_answer})
+                return final_answer
+
             # 解析 2: 检查是否需要调用工具
             tool_match = re.search(r"Action:\s*(\w+)\((.*?)\)", reply)
             if tool_match:

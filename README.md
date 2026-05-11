@@ -91,8 +91,9 @@ OPENAI_API_KEY="Key"
   # 1. 启动依赖服务（Redis、PostgreSQL、Ollama）
   docker-compose up -d redis db ollama
 
-  # 2. 拉取 embedding 模型
+  # 2. 拉取 embedding 模型 、Qwen 模型
   docker exec -it kita-ollama ollama pull nomic-embed-text
+  docker exec -it kita-ollama ollama pull qwen2.5:3b-instruct
 
   # 3. 配置 .env
   REDIS_URL=redis://localhost:6379/0

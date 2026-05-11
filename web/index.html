@@ -429,7 +429,7 @@
     <div class="chat-container">
         <div class="chat-header">
             <div>Kita-Agent 终端</div>
-            <div style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">模型: Default (GPT/GLM)</div>
+            <div style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">模型: Default (Qwen)</div>
         </div>
 
         <div class="chat-messages" id="chatBox">
@@ -757,7 +757,7 @@
                 appendMessage('agent', `❌ 错误: ${resData.info}`);
             }
         } catch (error) {
-            appendMessage('agent', `❌ 网络错误: ${error}`);
+            appendMessage('agent', `❌ 访问错误: ${error}`);
         } finally {
             loadingTip.style.display = 'none';
         }
@@ -933,7 +933,7 @@
                 showInfoModal('失败', `上传失败: ${resData.info}`);
             }
         } catch (error) {
-            showInfoModal('错误', `网络错误: ${error}`);
+            showInfoModal('错误', `访问错误: ${error}`);
         }
     }
 
@@ -971,7 +971,7 @@
                 }
                 container.innerHTML = html || '<div class="empty-state">暂无数据</div>';
             } else { container.innerHTML = `<div class="empty-state">加载失败: ${resData.info}</div>`; }
-        } catch (error) { container.innerHTML = `<div class="empty-state">网络错误: ${error}</div>`; }
+        } catch (error) { container.innerHTML = `<div class="empty-state">访问错误: ${error}</div>`; }
     }
 
     async function loadRedisData() {
@@ -995,7 +995,7 @@
                 } else { html = '<div class="empty-state">暂无活跃会话</div>'; }
                 container.innerHTML = html;
             } else { container.innerHTML = `<div class="empty-state">加载失败: ${resData.info}</div>`; }
-        } catch (error) { container.innerHTML = `<div class="empty-state">网络错误: ${error}</div>`; }
+        } catch (error) { container.innerHTML = `<div class="empty-state">访问错误: ${error}</div>`; }
     }
 
     function deleteKnowledgeTag(tag) {
@@ -1005,7 +1005,7 @@
                 const resData = await response.json();
                 if (resData.code === "0000") showInfoModal('成功', `标签 "${tag}" 已成功删除，共清理了 ${resData.data} 个文档。`, false, () => { refreshMaintenanceData(); });
                 else showInfoModal('失败', `删除失败: ${resData.info}`);
-            } catch (error) { showInfoModal('错误', `网络错误: ${error}`); }
+            } catch (error) { showInfoModal('错误', `访问错误: ${error}`); }
         });
     }
 
@@ -1044,7 +1044,7 @@
             const resData = await response.json();
             if (resData.code === "0000") showInfoModal('成功', '提示词已成功保存至 Redis，24小时内有效！', false, () => { closePromptModal(); });
             else showInfoModal('失败', `保存失败: ${resData.info}`);
-        } catch(error) { showInfoModal('错误', `网络错误: ${error}`); }
+        } catch(error) { showInfoModal('错误', `访问错误: ${error}`); }
     }
 </script>
 
