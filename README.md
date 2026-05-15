@@ -89,7 +89,7 @@ OPENAI_API_KEY="Key"
   方式二：本地开发模式
 ```bash
   # 1. 启动依赖服务（Redis、PostgreSQL、Ollama）
-  docker-compose up -d redis db ollama
+  docker-compose up -d redis db ollama reranker
 
   # 2. 拉取 embedding 模型 、Qwen 模型
   docker exec -it kita-ollama ollama pull nomic-embed-text
@@ -112,4 +112,22 @@ docker-compose logs app --tail=20
 
 ```
 pip freeze > requirements.txt
+```
+
+## 导出整个数据库（cmd命令最好）
+```
+docker exec -i kita-db-pgvector pg_dump -U postgres -d ai-rag-knowledge -f /tmp/knowledge_backup.sql
+docker cp kita-db-pgvector:/tmp/knowledge_backup.sql ./knowledge_backup_safe.sql
+```
+
+## 导入数据库
+```
+docker cp ./knowledge_backup_safe.sql kita-db-pgvector:/tmp/knowledge_backup.sql
+docker exec -i kita-db-pgvector psql -U postgres -d ai-rag-knowledge -c "DROP TABLE IF EXISTS langchain_pg_embedding CASCADE; DROP TABLE IF EXISTS langchain_pg_collection CASCADE;"
+docker exec -it kita-db-pgvector psql -U postgres -d ai-rag-knowledge -f /tmp/knowledge_backup.sql
+```
+
+## 清理空标签知识库
+```
+docker exec -it kita-db-pgvector psql -U postgres -d ai-rag-knowledge -c "DELETE FROM langchain_pg_embedding WHERE cmetadata->>'knowledge_tag' IS NULL;"
 ```

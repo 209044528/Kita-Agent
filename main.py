@@ -1,13 +1,35 @@
 import uvicorn
+import logging
+import os
+from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.trigger.http import chat_controller, maintenance_controller
 from fastapi.responses import FileResponse
 
+# 配置日志
+LOG_DIR = "logs"
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
+
+log_filename = f"kita_agent_{datetime.now().strftime('%Y%m%d')}.log"
+log_path = os.path.join(LOG_DIR, log_filename)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_path, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="Kita-Agent API",
-    description="基于 DDD 架构的 ReAct 智能体服务",
+    description="基于 DDD 架构 de ReAct 智能体服务",
     version="1.0.0"
 )
 
@@ -34,5 +56,5 @@ app.include_router(maintenance_controller.router, prefix="/api/v1", tags=["Maint
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
 
 if __name__ == "__main__":
-    print("🚀 正在启动 Kita-Agent FastAPI 服务...")
+    logger.info("🚀 正在启动 Kita-Agent FastAPI 服务...")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

@@ -9,8 +9,8 @@ class Response(BaseModel, Generic[T]):
     data: Optional[T] = None
 
     @classmethod
-    def success(cls, data: T):
-        return cls(code="0000", info="调用成功", data=data)
+    def success(cls, data: T, info: str = "调用成功"):
+        return cls(code="0000", info=info, data=data)
 
     @classmethod
     def error(cls, code: str, info: str):

@@ -2,7 +2,9 @@ from app.domain.agent.entity import AgentEntity
 from app.domain.agent.repository import ILlmService
 from app.infrastructure.repository.redis_agent_repo import RedisAgentRepository
 from app.application.services.knowledge_app_service import KnowledgeAppService
-from app.domain.agent.prompt import DEFAULT_PERSONA_PROMPT, REACT_INSTRUCTION_PROMPT
+from app.domain.agent.prompt import DEFAULT_PERSONA_PROMPT, build_react_instruction_prompt
+from app.domain.agent.tool import ToolRegistry
+from app.domain.agent.tools.knowledge_search_tool import KnowledgeSearchTool
 
 class ChatAppService:
     """
@@ -13,13 +15,22 @@ class ChatAppService:
         self.agent_repo = RedisAgentRepository()
         self.knowledge_service = knowledge_service
 
+        # 初始化工具注册中心
+        self.tool_registry = ToolRegistry()
+        if knowledge_service:
+            self.tool_registry.register(KnowledgeSearchTool(knowledge_service))
+
     def do_chat(self, session_id: str, user_input: str, knowledge_tag: str | None = None, system_prompt: str | None = None) -> str:
         """
         执行一次完整的对话业务流
         """
         custom_prompt = self.agent_repo.get_prompt(session_id)
         user_persona = custom_prompt.strip() if custom_prompt else DEFAULT_PERSONA_PROMPT
-        final_system_prompt = f"{user_persona}\n\n{REACT_INSTRUCTION_PROMPT}"
+
+        # 构建系统提示词（包含工具描述）
+        tool_descriptions = self.tool_registry.generate_tool_prompt()
+        react_instruction = build_react_instruction_prompt(tool_descriptions)
+        final_system_prompt = f"{user_persona}\n\n{react_instruction}"
 
         # 1. 从仓储中获取或创建 Agent
         agent = self.agent_repo.get(session_id)
@@ -36,29 +47,17 @@ class ChatAppService:
             elif not agent.messages or agent.messages[0]["role"] != "system":
                 agent.messages.insert(0, {"role": "system", "content": final_system_prompt})
 
-        # 2. 组装 RAG 上下文
-        prompt_input = user_input
-        original_input = user_input
-        if self.knowledge_service:
-            knowledge_context = self.knowledge_service.retrieve_knowledge(user_input, knowledge_tag)
-            if knowledge_context:
-                prompt_input = (
-                    "请优先参考以下知识库内容回答，如果知识不足请明确说明。\n"
-                    f"[Knowledge Context]\n{knowledge_context}\n\n"
-                    f"[User Question]\n{user_input}"
-                )
-
-        # 3. 执行对话
-        reply = agent.process_chat(prompt_input, self.llm_service, original_user_input=original_input, knowledge_service=self.knowledge_service)
+        # 2. 执行对话（移除被动 RAG 拼接，让 Agent 主动调用工具）
+        reply = agent.process_chat(user_input, self.llm_service, tool_registry=self.tool_registry)
 
         if not agent.title:
             summary_prompt = [{"role": "user",
-                               "content": f"请为以下对话起一个极其简短的标题（不超过10个字）：\n用户：{original_input}\n助手：{reply}"}]
+                               "content": f"请为以下对话起一个极其简短的标题（不超过10个字）：\n用户：{user_input}\n助手：{reply}"}]
             try:
                 title_gen = self.llm_service.generate_reply(summary_prompt)
-                agent.title = title_gen.strip().replace("“", "").replace("”", "")
+                agent.title = title_gen.strip().replace("””, “").replace("””, “")
             except:
-                agent.title = original_input[:15] + ("..." if len(original_input) > 15 else "")
+                agent.title = user_input[:15] + ("..." if len(user_input) > 15 else "")
 
         # 4. 存回仓储
         self.agent_repo.save(agent)

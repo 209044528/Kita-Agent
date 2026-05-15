@@ -5,9 +5,10 @@ from typing import List, Dict, Any
 class DocumentEntity:
     """领域层文档实体"""
 
-    def __init__(self, content: str, metadata: Dict[str, Any] = None):
+    def __init__(self, content: str, metadata: Dict[str, Any] = None, id: str = None):
         self.content = content
         self.metadata = metadata or {}
+        self.id = id
 
 
 class IKnowledgeRepository(ABC):

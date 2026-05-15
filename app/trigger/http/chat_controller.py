@@ -1,34 +1,61 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, Depends
 from app.types.request.chat_request import ChatRequestDTO
+from app.core.rate_limit import rate_limit_by_ip
 from app.types.request.knowledge_request import KnowledgeUpsertRequestDTO
 from app.types.request.knowledge_delete_request import KnowledgeDeleteRequestDTO
 from app.types.response import Response
 from app.application.services.chat_app_service import ChatAppService
 from app.application.services.knowledge_app_service import KnowledgeAppService
+from app.application.services.document_parser_service import DocumentParserService
 from app.infrastructure.llm.openai_client import OpenAILlmServiceImpl
 from app.infrastructure.repository.pgvector_knowledge_repo import PgVectorKnowledgeRepository
 from app.infrastructure.repository.redis_agent_repo import RedisAgentRepository
 from pydantic import BaseModel, Field
 from typing import Dict
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 llm_service = OpenAILlmServiceImpl()
 knowledge_repo = PgVectorKnowledgeRepository()
-knowledge_service = KnowledgeAppService(knowledge_repo)
+knowledge_service = KnowledgeAppService(knowledge_repo, use_model_reranker=True)
 chat_app_service = ChatAppService(llm_service, knowledge_service=knowledge_service)
 agent_repo = RedisAgentRepository()
 
 
-@router.post("/knowledge/upsert", response_model=Response[bool])
-def upsert_knowledge(request: KnowledgeUpsertRequestDTO):
+def _process_knowledge_background(request: KnowledgeUpsertRequestDTO):
+    """后台任务：处理知识入库"""
     try:
+        # 如果提供了文件路径，先解析文件
+        if request.file_path:
+            raw_text = DocumentParserService.parse_document_to_text(request.file_path)
+        else:
+            raw_text = request.raw_text
+
         knowledge_service.process_and_store_text(
-            raw_text=request.raw_text,
+            raw_text=raw_text,
             tag=request.tag,
             source_name=request.source_name,
         )
-        return Response.success(data=True)
+        logger.info(f"知识入库完成: tag={request.tag}, source={request.source_name}")
+    except Exception as e:
+        logger.error(f"知识入库失败: {str(e)}")
+
+
+@router.post("/knowledge/upsert", response_model=Response[bool])
+def upsert_knowledge(request: KnowledgeUpsertRequestDTO, background_tasks: BackgroundTasks):
+    try:
+        # 验证输入
+        request.validate_input()
+
+        # 将入库任务提交到后台执行
+        background_tasks.add_task(_process_knowledge_background, request)
+
+        return Response.success(data=True, info="入库任务已提交后台处理")
+    except ValueError as e:
+        return Response.error(code="400", info=str(e))
     except Exception as e:
         return Response.error(code="500", info=str(e))
 
@@ -90,7 +117,7 @@ def get_session_history(session_id: str):
 
 
 @router.post("/chat", response_model=Response[str])
-def chat(request: ChatRequestDTO):
+def chat(request: ChatRequestDTO, _: None = Depends(rate_limit_by_ip)):
     try:
         reply = chat_app_service.do_chat(
             session_id=request.session_id,

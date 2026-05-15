@@ -27,12 +27,15 @@ class PgVectorKnowledgeRepository(IKnowledgeRepository):
         )
 
     def add_documents(self, documents: List[DocumentEntity]) -> None:
-        # 将领域实体转换为 LangChain 文档格式
-        lc_docs = [
-            LangchainDocument(page_content=doc.content, metadata=doc.metadata)
-            for doc in documents
-        ]
-        self.vector_store.add_documents(lc_docs)
+        # 将领域实体转换为 LangChain 文档格式，并提取唯一 ID
+        lc_docs = []
+        ids = []
+        for doc in documents:
+            lc_docs.append(LangchainDocument(page_content=doc.content, metadata=doc.metadata))
+            ids.append(doc.id)
+            
+        # 使用 ids 参数调用 add_documents 以实现幂等去重 (Upsert)
+        self.vector_store.add_documents(lc_docs, ids=ids)
 
     def similarity_search(self, query: str, top_k: int = 5, filter_kwargs: dict = None) -> List[DocumentEntity]:
         # 执行相似度检索
@@ -41,9 +44,9 @@ class PgVectorKnowledgeRepository(IKnowledgeRepository):
             k=top_k,
             filter=filter_kwargs
         )
-        # 将 LangChain 文档转换回领域实体
+        # 将 LangChain 文档转换回领域实体，包含 ID
         return [
-            DocumentEntity(content=doc.page_content, metadata=doc.metadata)
+            DocumentEntity(content=doc.page_content, metadata=doc.metadata, id=getattr(doc, 'id', None))
             for doc in lc_docs
         ]
 
