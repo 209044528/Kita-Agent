@@ -2,7 +2,6 @@ import time
 from fastapi import Request, HTTPException
 from redis import Redis
 from app.core.config import settings
-from app.types.response import Response
 
 redis_client = Redis.from_url(settings.REDIS_URL, decode_responses=True)
 

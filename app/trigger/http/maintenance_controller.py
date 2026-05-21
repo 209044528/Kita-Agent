@@ -1,54 +1,88 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, Depends
 from app.types.response import Response
 from app.core.config import settings
+from app.core.exceptions import KnowledgeError
+from app.core.container import get_knowledge_service
+from app.application.services.knowledge_app_service import KnowledgeAppService
+from loguru import logger
+from pydantic import BaseModel, Field
 import redis
 import psycopg2
+import json
 from typing import List, Dict, Any
 
 router = APIRouter()
 
 
+class GitIngestRequest(BaseModel):
+    repo_url: str = Field(..., description="Git 仓库链接")
+    branch: str = Field(default="main", description="分支名称")
+    knowledge_tag: str = Field(default=None, description="知识库标签")
+
+
+def _background_git_ingest(
+    request: GitIngestRequest, 
+    knowledge_service: KnowledgeAppService
+):
+    """后台执行 Git 解析入库"""
+    try:
+        knowledge_service.ingest_git_repo(
+            repo_url=request.repo_url,
+            branch=request.branch,
+            knowledge_tag=request.knowledge_tag
+        )
+    except Exception as e:
+        logger.error(f"Git 仓库 {request.repo_url} 后台入库失败: {str(e)}")
+
+
+@router.post("/knowledge/git", response_model=Response[None])
+def ingest_git_knowledge(
+    request: GitIngestRequest,
+    background_tasks: BackgroundTasks,
+    knowledge_service: KnowledgeAppService = Depends(get_knowledge_service)
+):
+    """一键解析 Git 仓库并入库"""
+    background_tasks.add_task(_background_git_ingest, request, knowledge_service)
+    return Response.success(info="Git 仓库解析任务已提交后台执行")
+
+
 @router.get("/maintenance/redis", response_model=Response[List[Dict[str, Any]]])
 def get_redis_sessions():
     """查看 Redis 中的会话数据"""
-    try:
-        client = redis.from_url(settings.REDIS_URL, decode_responses=True)
-        keys = client.keys("kita:*")
+    client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+    keys = client.keys("kita:*")
 
-        sessions = []
-        for key in keys:
-            session_id = key.split(":")[-1]
-            ttl = client.ttl(key)
-            data = client.get(key)
+    sessions = []
+    for key in keys:
+        session_id = key.split(":")[-1]
+        ttl = client.ttl(key)
+        data = client.get(key)
 
-            if data and data.strip():
-                import json
-                try:
-                    agent_data = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                message_count = len(agent_data.get("messages", []))
-                messages = agent_data.get("messages", [])
+        if data and data.strip():
+            try:
+                agent_data = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            message_count = len(agent_data.get("messages", []))
+            messages = agent_data.get("messages", [])
 
-                recent_messages = []
-                for msg in messages[-4:]:
-                    content = msg.get("content", "")
-                    preview = content[:100] + "..." if len(content) > 100 else content
-                    recent_messages.append({
-                        "role": msg.get("role", "unknown"),
-                        "content": preview
-                    })
-
-                sessions.append({
-                    "session_id": session_id,
-                    "ttl": ttl,
-                    "message_count": message_count,
-                    "recent_messages": recent_messages
+            recent_messages = []
+            for msg in messages[-4:]:
+                content = msg.get("content", "")
+                preview = content[:100] + "..." if len(content) > 100 else content
+                recent_messages.append({
+                    "role": msg.get("role", "unknown"),
+                    "content": preview
                 })
 
-        return Response.success(data=sessions)
-    except Exception as e:
-        return Response.error(code="500", info=str(e))
+            sessions.append({
+                "session_id": session_id,
+                "ttl": ttl,
+                "message_count": message_count,
+                "recent_messages": recent_messages
+            })
+
+    return Response.success(data=sessions)
 
 
 @router.get("/maintenance/knowledge", response_model=Response[Dict[str, Any]])
@@ -127,4 +161,5 @@ def get_knowledge_stats():
             "tag_stats": [{"tag": t[0], "count": t[1]} for t in tag_stats]
         })
     except Exception as e:
-        return Response.error(code="500", info=str(e))
+        logger.error(f"查询统计失败: {str(e)}")
+        raise KnowledgeError(info=f"查询统计失败: {str(e)}")

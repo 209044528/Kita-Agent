@@ -7,25 +7,20 @@ from app.types.response import Response
 from app.application.services.chat_app_service import ChatAppService
 from app.application.services.knowledge_app_service import KnowledgeAppService
 from app.application.services.document_parser_service import DocumentParserService
-from app.infrastructure.llm.openai_client import OpenAILlmServiceImpl
-from app.infrastructure.repository.pgvector_knowledge_repo import PgVectorKnowledgeRepository
-from app.infrastructure.repository.redis_agent_repo import RedisAgentRepository
+from app.domain.agent.repository import IAgentRepository
+from app.core.container import get_chat_service, get_knowledge_service, get_agent_repo
+from app.core.exceptions import ResourceNotFoundError
 from pydantic import BaseModel, Field
-from typing import Dict
-import logging
-
-logger = logging.getLogger(__name__)
+from typing import Dict, List
+from loguru import logger
 
 router = APIRouter()
 
-llm_service = OpenAILlmServiceImpl()
-knowledge_repo = PgVectorKnowledgeRepository()
-knowledge_service = KnowledgeAppService(knowledge_repo, use_model_reranker=True)
-chat_app_service = ChatAppService(llm_service, knowledge_service=knowledge_service)
-agent_repo = RedisAgentRepository()
 
-
-def _process_knowledge_background(request: KnowledgeUpsertRequestDTO):
+def _process_knowledge_background(
+    request: KnowledgeUpsertRequestDTO, 
+    knowledge_service: KnowledgeAppService
+):
     """后台任务：处理知识入库"""
     try:
         # 如果提供了文件路径，先解析文件
@@ -45,90 +40,99 @@ def _process_knowledge_background(request: KnowledgeUpsertRequestDTO):
 
 
 @router.post("/knowledge/upsert", response_model=Response[bool])
-def upsert_knowledge(request: KnowledgeUpsertRequestDTO, background_tasks: BackgroundTasks):
-    try:
-        # 验证输入
-        request.validate_input()
+def upsert_knowledge(
+    request: KnowledgeUpsertRequestDTO, 
+    background_tasks: BackgroundTasks,
+    knowledge_service: KnowledgeAppService = Depends(get_knowledge_service)
+):
+    """添加或更新知识"""
+    # 验证输入
+    request.validate_input()
 
-        # 将入库任务提交到后台执行
-        background_tasks.add_task(_process_knowledge_background, request)
+    # 将入库任务提交到后台执行
+    background_tasks.add_task(_process_knowledge_background, request, knowledge_service)
 
-        return Response.success(data=True, info="入库任务已提交后台处理")
-    except ValueError as e:
-        return Response.error(code="400", info=str(e))
-    except Exception as e:
-        return Response.error(code="500", info=str(e))
+    return Response.success(data=True, info="入库任务已提交后台处理")
 
 
 @router.delete("/knowledge/delete", response_model=Response[int])
-def delete_knowledge(request: KnowledgeDeleteRequestDTO):
-    try:
-        deleted_count = knowledge_service.delete_knowledge_by_tag(request.tag)
-        return Response.success(data=deleted_count)
-    except Exception as e:
-        return Response.error(code="500", info=str(e))
+def delete_knowledge(
+    request: KnowledgeDeleteRequestDTO,
+    knowledge_service: KnowledgeAppService = Depends(get_knowledge_service)
+):
+    """删除指定标签的知识"""
+    deleted_count = knowledge_service.delete_knowledge_by_tag(request.tag)
+    return Response.success(data=deleted_count)
 
 
-@router.get("/sessions", response_model=Response[list[dict]])
-def get_all_sessions():
-    try:
-        session_ids = agent_repo.list_sessions()
-        sessions = []
-        for session_id in session_ids:
-            agent = agent_repo.get(session_id)
-            if agent:
-                sessions.append({
-                    "id": agent.session_id,
-                    "title": agent.title or "未归档对话"
-                })
-        return Response.success(data=sessions)
-    except Exception as e:
-        return Response.error(code="500", info=str(e))
+@router.get("/sessions", response_model=Response[List[Dict]])
+def get_all_sessions(agent_repo: IAgentRepository = Depends(get_agent_repo)):
+    """获取所有会话列表"""
+    session_ids = agent_repo.list_sessions()
+    sessions = []
+    for session_id in session_ids:
+        agent = agent_repo.get(session_id)
+        if agent:
+            sessions.append({
+                "id": agent.session_id,
+                "title": agent.title or "未归档对话"
+            })
+    return Response.success(data=sessions)
 
-@router.post("/session/rename")
-def rename_session(request: Dict[str, str]):
+@router.post("/session/rename", response_model=Response[bool])
+def rename_session(
+    request: Dict[str, str],
+    agent_repo: IAgentRepository = Depends(get_agent_repo)
+):
+    """会话重命名"""
     agent = agent_repo.get(request['session_id'])
     if agent:
         agent.title = request['title']
         agent_repo.save(agent)
         return Response.success(data=True)
-    return Response.error(code="404", info="未找到会话")
+    raise ResourceNotFoundError(info="未找到会话")
 
-@router.delete("/session/{session_id}")
-def delete_session(session_id: str):
+@router.delete("/session/{session_id}", response_model=Response[bool])
+def delete_session(
+    session_id: str,
+    agent_repo: IAgentRepository = Depends(get_agent_repo)
+):
+    """删除会话"""
     agent_repo.delete(session_id)
     return Response.success(data=True)
 
-@router.get("/session/{session_id}", response_model=Response[dict])
-def get_session_history(session_id: str):
+@router.get("/session/{session_id}", response_model=Response[Dict])
+def get_session_history(
+    session_id: str,
+    agent_repo: IAgentRepository = Depends(get_agent_repo)
+):
     """获取指定会话的历史消息"""
-    try:
-        agent = agent_repo.get(session_id)
-        if not agent:
-            return Response.error(code="404", info="会话不存在")
+    agent = agent_repo.get(session_id)
+    if not agent:
+        raise ResourceNotFoundError(info="会话不存在")
 
-        # 返回会话的消息历史
-        return Response.success(data={
-            "session_id": agent.session_id,
-            "messages": agent.messages
-        })
-    except Exception as e:
-        return Response.error(code="500", info=str(e))
+    # 返回会话的消息历史
+    return Response.success(data={
+        "session_id": agent.session_id,
+        "messages": agent.messages
+    })
 
 
 @router.post("/chat", response_model=Response[str])
-def chat(request: ChatRequestDTO, _: None = Depends(rate_limit_by_ip)):
-    try:
-        reply = chat_app_service.do_chat(
-            session_id=request.session_id,
-            user_input=request.user_input,
-            knowledge_tag=request.knowledge_tag,
-            system_prompt=request.system_prompt,
-        )
+async def chat(
+    request: ChatRequestDTO, 
+    _: None = Depends(rate_limit_by_ip),
+    chat_app_service: ChatAppService = Depends(get_chat_service)
+):
+    """智能体对话接口"""
+    reply = await chat_app_service.do_chat(
+        session_id=request.session_id,
+        user_input=request.user_input,
+        model_name=request.model_name,
+        system_prompt=request.system_prompt,
+    )
 
-        return Response.success(data=reply)
-    except Exception as e:
-        return Response.error(code="500", info=str(e))
+    return Response.success(data=reply)
 
 class PromptRequestDTO(BaseModel):
     session_id: str = Field(..., description="用户会话ID")
@@ -136,20 +140,20 @@ class PromptRequestDTO(BaseModel):
 
 
 @router.post("/prompt", response_model=Response[bool])
-def save_system_prompt(request: PromptRequestDTO):
+def save_system_prompt(
+    request: PromptRequestDTO,
+    agent_repo: IAgentRepository = Depends(get_agent_repo)
+):
     """保存用户自定义提示词"""
-    try:
-        agent_repo.save_prompt(request.session_id, request.system_prompt)
-        return Response.success(data=True)
-    except Exception as e:
-        return Response.error(code="500", info=str(e))
+    agent_repo.save_prompt(request.session_id, request.system_prompt)
+    return Response.success(data=True)
 
 @router.get("/prompt", response_model=Response[str])
-def get_system_prompt(session_id: str):
+def get_system_prompt(
+    session_id: str,
+    agent_repo: IAgentRepository = Depends(get_agent_repo)
+):
     """获取用户自定义提示词"""
-    try:
-        prompt = agent_repo.get_prompt(session_id)
-        # 如果 Redis 中没有，返回空字符串让前端处理默认值
-        return Response.success(data=prompt or "")
-    except Exception as e:
-        return Response.error(code="500", info=str(e))
+    prompt = agent_repo.get_prompt(session_id)
+    # 如果 Redis 中没有，返回空字符串让前端处理默认值
+    return Response.success(data=prompt or "")

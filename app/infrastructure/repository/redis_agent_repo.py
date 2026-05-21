@@ -1,9 +1,11 @@
 import redis
+from typing import List, Optional
 from app.domain.agent.entity import AgentEntity
+from app.domain.agent.repository import IAgentRepository
 from app.core.config import settings
 
 
-class RedisAgentRepository:
+class RedisAgentRepository(IAgentRepository):
     def __init__(self):
         # 初始化 Redis 客户端
         self.client = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -12,7 +14,7 @@ class RedisAgentRepository:
     def _get_key(self, session_id: str) -> str:
         return f"kita:agent:session:{session_id}"
 
-    def get(self, session_id: str) -> AgentEntity | None:
+    def get(self, session_id: str) -> Optional[AgentEntity]:
         """从 Redis 获取 Agent 实体"""
         data = self.client.get(self._get_key(session_id))
         if data and data.strip():
@@ -34,10 +36,10 @@ class RedisAgentRepository:
         )
 
     def delete(self, session_id: str) -> None:
-        """可选：手动清理会话"""
+        """手动清理会话"""
         self.client.delete(self._get_key(session_id))
 
-    def list_sessions(self) -> list[str]:
+    def list_sessions(self) -> List[str]:
         """获取所有会话 ID 列表"""
         keys = self.client.keys("kita:agent:session:*")
         return [k.split(":")[-1] for k in keys]
@@ -50,6 +52,6 @@ class RedisAgentRepository:
             value=prompt
         )
 
-    def get_prompt(self, session_id: str) -> str | None:
+    def get_prompt(self, session_id: str) -> Optional[str]:
         """从 Redis 获取该会话的自定义提示词"""
         return self.client.get(f"kita:prompt:{session_id}")

@@ -1,11 +1,9 @@
 import re
-import logging
+from loguru import logger
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
-from app.domain.agent.repository import ILlmService
+from app.domain.agent.repository import ILLMClient
 from app.domain.agent.tool import ToolRegistry
-
-logger = logging.getLogger(__name__)
 
 
 class AgentEntity(BaseModel):
@@ -23,10 +21,11 @@ class AgentEntity(BaseModel):
         if self.system_prompt and not self.messages:
             self.messages.append({"role": "system", "content": self.system_prompt})
 
-    def process_chat(
+    async def process_chat(
         self,
         user_input: str,
-        llm_service: ILlmService,
+        llm_client: ILLMClient,
+        model_name: Optional[str] = None,
         original_user_input: Optional[str] = None,
         tool_registry: Optional[ToolRegistry] = None
     ) -> str:
@@ -35,9 +34,10 @@ class AgentEntity(BaseModel):
 
         Args:
             user_input: 用户输入
-            llm_service: LLM 服务实例
-            original_user_input: 用户的原始问题（用于存储到历史记录，如果与 user_input 不同）
-            tool_registry: 工具注册中心，用于动态路由工具调用
+            llm_client: LLM 客户端实例
+            model_name: 指定模型名称
+            original_user_input: 用户的原始问题
+            tool_registry: 工具注册中心
         """
         # 存储用户输入到历史记录
         display_input = original_user_input if original_user_input else user_input
@@ -50,7 +50,7 @@ class AgentEntity(BaseModel):
             logger.info(f"[内部思考 第 {step + 1} 步]")
 
             # 获取 LLM 回答
-            reply = llm_service.generate_reply(working_messages)
+            reply = await llm_client.chat(working_messages, model=model_name)
 
             logger.info(f"AI 输出: {reply}")
 

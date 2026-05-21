@@ -1,6 +1,5 @@
 from app.domain.agent.entity import AgentEntity
-from app.domain.agent.repository import ILlmService
-from app.infrastructure.repository.redis_agent_repo import RedisAgentRepository
+from app.domain.agent.repository import ILLMClient, IAgentRepository
 from app.application.services.knowledge_app_service import KnowledgeAppService
 from app.domain.agent.prompt import DEFAULT_PERSONA_PROMPT, build_react_instruction_prompt
 from app.domain.agent.tool import ToolRegistry
@@ -10,9 +9,14 @@ class ChatAppService:
     """
     应用服务层：负责业务流程编排
     """
-    def __init__(self, llm_service: ILlmService, knowledge_service: KnowledgeAppService | None = None):
-        self.llm_service = llm_service
-        self.agent_repo = RedisAgentRepository()
+    def __init__(
+        self, 
+        llm_client: ILLMClient, 
+        agent_repo: IAgentRepository,
+        knowledge_service: KnowledgeAppService | None = None
+    ):
+        self.llm_client = llm_client
+        self.agent_repo = agent_repo
         self.knowledge_service = knowledge_service
 
         # 初始化工具注册中心
@@ -20,7 +24,13 @@ class ChatAppService:
         if knowledge_service:
             self.tool_registry.register(KnowledgeSearchTool(knowledge_service))
 
-    def do_chat(self, session_id: str, user_input: str, knowledge_tag: str | None = None, system_prompt: str | None = None) -> str:
+    async def do_chat(
+        self, 
+        session_id: str, 
+        user_input: str, 
+        model_name: str | None = None,
+        system_prompt: str | None = None
+    ) -> str:
         """
         执行一次完整的对话业务流
         """
@@ -48,13 +58,18 @@ class ChatAppService:
                 agent.messages.insert(0, {"role": "system", "content": final_system_prompt})
 
         # 2. 执行对话（移除被动 RAG 拼接，让 Agent 主动调用工具）
-        reply = agent.process_chat(user_input, self.llm_service, tool_registry=self.tool_registry)
+        reply = await agent.process_chat(
+            user_input, 
+            self.llm_client, 
+            model_name=model_name,
+            tool_registry=self.tool_registry
+        )
 
         if not agent.title:
             summary_prompt = [{"role": "user",
                                "content": f"请为以下对话起一个极其简短的标题（不超过10个字）：\n用户：{user_input}\n助手：{reply}"}]
             try:
-                title_gen = self.llm_service.generate_reply(summary_prompt)
+                title_gen = await self.llm_client.chat(summary_prompt, model=model_name)
                 agent.title = title_gen.strip().replace("””, “").replace("””, “")
             except:
                 agent.title = user_input[:15] + ("..." if len(user_input) > 15 else "")

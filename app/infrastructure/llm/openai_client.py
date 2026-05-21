@@ -1,12 +1,12 @@
+import asyncio
 import time
-import logging
+from loguru import logger
 from openai import OpenAI
 from app.core.config import settings
-from app.domain.agent.repository import ILlmService
+from app.domain.agent.repository import ILLMClient
 
-logger = logging.getLogger(__name__)
 
-class OpenAILlmServiceImpl(ILlmService):
+class OpenAILlmServiceImpl(ILLMClient):
     def __init__(self):
         base_client = OpenAI(
             api_key=settings.OPENAI_API_KEY,
@@ -27,7 +27,8 @@ class OpenAILlmServiceImpl(ILlmService):
         self.model_name = settings.MODEL_NAME
         self.last_call_time = 0.0
 
-    def generate_reply(self, messages: list) -> str:
+    async def chat(self, messages: list, model: str = None, **kwargs) -> str:
+        model_to_use = model or self.model_name
         for attempt in range(3):
             current_time = time.time()
             elapsed_time = current_time - self.last_call_time
@@ -35,15 +36,16 @@ class OpenAILlmServiceImpl(ILlmService):
             if self.last_call_time > 0 and elapsed_time < 20.0:
                 wait_time = 20.0 - elapsed_time
                 logger.info(f"触发 API 频率限制，挂起等待 {wait_time:.1f} 秒")
-                time.sleep(wait_time)
+                await asyncio.sleep(wait_time)
 
             self.last_call_time = time.time()
             try:
-                logger.info(f"正在向 LLM 发送请求 (尝试 {attempt + 1}/3)")
+                logger.info(f"正在向 LLM 发送请求 (尝试 {attempt + 1}/3), Model: {model_to_use}")
                 response = self.client.chat.completions.create(
-                    model=self.model_name,
+                    model=model_to_use,
                     messages=messages,
-                    temperature=0.7
+                    temperature=0.7,
+                    **kwargs
                 )
                 return response.choices[0].message.content or ""
             except Exception as e:
@@ -51,4 +53,4 @@ class OpenAILlmServiceImpl(ILlmService):
                     logger.error(f"LLM 请求失败，已达最大重试次数: {str(e)}")
                     return f"系统错误: {str(e)}"
                 logger.warning(f"请求失败，准备重试: {str(e)}")
-                time.sleep(2)
+                await asyncio.sleep(2)

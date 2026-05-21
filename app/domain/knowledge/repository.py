@@ -1,14 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field
 
 
-class DocumentEntity:
+class DocumentEntity(BaseModel):
     """领域层文档实体"""
-
-    def __init__(self, content: str, metadata: Dict[str, Any] = None, id: str = None):
-        self.content = content
-        self.metadata = metadata or {}
-        self.id = id
+    content: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    id: Optional[str] = None
 
 
 class IKnowledgeRepository(ABC):

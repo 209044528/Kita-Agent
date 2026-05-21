@@ -1,18 +1,25 @@
 import hashlib
 from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 from app.domain.knowledge.repository import IKnowledgeRepository, DocumentEntity
-from typing import List, Optional
+from typing import List
 import httpx
-import logging
+from loguru import logger
 from app.core.config import settings
 
-logger = logging.getLogger(__name__)
+
+from app.infrastructure.parser.git_parser import GitRepositoryParser
 
 
 class KnowledgeAppService:
-    def __init__(self, knowledge_repo: IKnowledgeRepository, use_model_reranker: bool = False):
+    def __init__(
+        self, 
+        knowledge_repo: IKnowledgeRepository, 
+        use_model_reranker: bool = False,
+        git_parser: GitRepositoryParser | None = None
+    ):
         self.knowledge_repo = knowledge_repo
         self.use_model_reranker = use_model_reranker
+        self.git_parser = git_parser or GitRepositoryParser()
 
         # 混合切分策略：先按 Markdown 标题切分，再细粒度切分
         self.markdown_splitter = MarkdownHeaderTextSplitter(
@@ -171,3 +178,25 @@ class KnowledgeAppService:
         根据标签删除知识库内容，返回删除的文档数量
         """
         return self.knowledge_repo.delete_by_tag(tag)
+
+    def ingest_git_repo(self, repo_url: str, branch: str = "main", knowledge_tag: str = None) -> None:
+        """
+        解析 Git 仓库并向量化入库
+        """
+        # 1. 确定标签
+        if not knowledge_tag:
+            knowledge_tag = repo_url.split("/")[-1].replace(".git", "")
+
+        # 2. 调用解析器获取分块后的文档实体
+        documents = self.git_parser.parse_repo(repo_url, branch)
+
+        # 3. 注入统一标签并入库
+        for doc in documents:
+            doc.metadata["knowledge_tag"] = knowledge_tag
+            # 这里的 ID 已经在 GitParser 中生成了（或者我们可以重新生成以保证幂等）
+            if not doc.id:
+                doc.id = hashlib.md5(doc.content.encode("utf-8")).hexdigest()
+
+        if documents:
+            self.knowledge_repo.add_documents(documents)
+            logger.info(f"Git 仓库 {repo_url} 入库成功，标签: {knowledge_tag}")

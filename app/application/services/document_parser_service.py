@@ -1,8 +1,8 @@
 from pathlib import Path
-from typing import Optional
-import logging
-
-logger = logging.getLogger(__name__)
+from loguru import logger
+from pypdf import PdfReader
+from docx import Document
+from unstructured.partition.auto import partition
 
 
 class DocumentParserService:
@@ -56,49 +56,32 @@ class DocumentParserService:
     @staticmethod
     def _parse_pdf(file_path: str) -> str:
         """解析 PDF 文件"""
-        try:
-            from pypdf import PdfReader
+        reader = PdfReader(file_path)
+        text_parts = []
 
-            reader = PdfReader(file_path)
-            text_parts = []
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                text_parts.append(text)
 
-            for page in reader.pages:
-                text = page.extract_text()
-                if text:
-                    text_parts.append(text)
-
-            return "\n\n".join(text_parts)
-        except ImportError:
-            return DocumentParserService._parse_with_unstructured(file_path)
+        return "\n\n".join(text_parts)
 
     @staticmethod
     def _parse_word(file_path: str) -> str:
         """解析 Word 文档"""
-        try:
-            from docx import Document
+        doc = Document(file_path)
+        text_parts = []
 
-            doc = Document(file_path)
-            text_parts = []
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                text_parts.append(paragraph.text)
 
-            for paragraph in doc.paragraphs:
-                if paragraph.text.strip():
-                    text_parts.append(paragraph.text)
-
-            return "\n\n".join(text_parts)
-        except ImportError:
-            return DocumentParserService._parse_with_unstructured(file_path)
+        return "\n\n".join(text_parts)
 
     @staticmethod
     def _parse_with_unstructured(file_path: str) -> str:
         """使用 unstructured 库解析文档（通用方法）"""
-        try:
-            from unstructured.partition.auto import partition
+        elements = partition(filename=file_path)
+        text_parts = [str(element) for element in elements]
 
-            elements = partition(filename=file_path)
-            text_parts = [str(element) for element in elements]
-
-            return "\n\n".join(text_parts)
-        except ImportError as e:
-            raise ImportError(
-                "unstructured 库未安装，请运行: pip install unstructured"
-            ) from e
+        return "\n\n".join(text_parts)
