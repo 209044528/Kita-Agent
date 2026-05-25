@@ -1,5 +1,11 @@
 import sys
 import os
+
+# 禁用 LiteLLM 遥测和远程价格表拉取（必须在所有业务 import 之前设置）
+os.environ["LITELLM_TELEMETRY"] = "False"
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+
+import mimetypes
 from loguru import logger
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, FileResponse
@@ -9,6 +15,10 @@ from app.trigger.http import chat_controller, maintenance_controller
 from app.core.exceptions import KitaBaseException
 from app.types.response import Response
 import uvicorn
+
+# 确保 .js 文件在 Windows 等环境下返回正确的 MIME 类型
+mimetypes.add_type('application/javascript', '.js')
+mimetypes.add_type('text/css', '.css')
 
 # --- 1. 初始化 Loguru 日志 ---
 LOG_DIR = "logs"

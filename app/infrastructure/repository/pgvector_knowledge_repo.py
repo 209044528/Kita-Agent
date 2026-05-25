@@ -1,9 +1,8 @@
 from typing import List
-import warnings
 from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
 from langchain_core.documents import Document as LangchainDocument
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_ollama import OllamaEmbeddings
 
 from app.core.config import settings
 from app.domain.knowledge.repository import IKnowledgeRepository, DocumentEntity
@@ -11,9 +10,6 @@ from app.domain.knowledge.repository import IKnowledgeRepository, DocumentEntity
 
 class PgVectorKnowledgeRepository(IKnowledgeRepository):
     def __init__(self):
-        # 过滤 LangChain 弃用警告
-        warnings.filterwarnings('ignore', category=DeprecationWarning, module='langchain_community')
-
         self.embeddings = OllamaEmbeddings(
             base_url=settings.OLLAMA_BASE_URL,
             model=settings.OLLAMA_EMBEDDING_MODEL

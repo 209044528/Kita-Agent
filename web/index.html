@@ -4,405 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kita-Agent 终端</title>
+    <base href="/">
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked-katex-extension/lib/index.umd.js"></script>
 
-    <style>
-        :root {
-            --bg-color: #f5f6f8;
-            --chat-bg: #ffffff;
-            --sidebar-bg: #f9f9f9;
-            --sidebar-hover: #ececec;
-            --text-main: #333333;
-            --text-muted: #888888;
-            --primary-color: #007bff;
-            --user-bubble: #e3f2fd;
-            --agent-bubble: #f1f3f5;
-            --border-color: #dddddd;
-            --sidebar-width: 260px;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --bg-color: #121212;
-                --chat-bg: #1e1e1e;
-                --sidebar-bg: #202123;
-                --sidebar-hover: #2a2b32;
-                --text-main: #e0e0e0;
-                --text-muted: #aaaaaa;
-                --primary-color: #3f51b5;
-                --user-bubble: #2c3e50;
-                --agent-bubble: #333333;
-                --border-color: #444444;
-            }
-        }
-
-        * { box-sizing: border-box; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            margin: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-
-        .app-container {
-            width: 100%;
-            height: 100vh;
-            display: flex;
-            gap: 0;
-            overflow: hidden;
-        }
-
-        /* ====== 侧边栏样式 ====== */
-        .sidebar {
-            width: var(--sidebar-width);
-            background: var(--sidebar-bg);
-            border-right: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }
-
-        .sidebar-top {
-            display: flex;
-            flex-direction: column;
-            padding: 15px;
-            gap: 15px;
-            flex: 1;
-            overflow-y: auto;
-        }
-
-        .new-chat-btn {
-            width: 100%;
-            padding: 12px;
-            border-radius: 8px;
-            background: transparent;
-            border: 1px solid var(--border-color);
-            color: var(--text-main);
-            text-align: left;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-size: 0.95rem;
-            transition: background 0.2s;
-        }
-
-        .new-chat-btn:hover { background: var(--sidebar-hover); }
-
-        .history-list {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        .history-list-title {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            margin-bottom: 5px;
-            padding-left: 5px;
-        }
-
-        .history-item-container {
-            position: relative;
-            display: flex;
-            align-items: center;
-            border-radius: 8px;
-            transition: background 0.2s;
-        }
-        .history-item-container:hover { background: var(--sidebar-hover); }
-        .history-item-container.active { background: var(--sidebar-hover); font-weight: 500; }
-
-        .history-item {
-            flex: 1;
-            padding: 10px 12px;
-            background: transparent;
-            border: none;
-            color: var(--text-main);
-            text-align: left;
-            cursor: pointer;
-            font-size: 0.9rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .menu-dots {
-            padding: 5px 10px;
-            cursor: pointer;
-            color: var(--text-muted);
-            opacity: 0;
-            border-radius: 4px;
-        }
-        .history-item-container:hover .menu-dots { opacity: 1; }
-        .menu-dots:hover { background: rgba(0,0,0,0.1); }
-
-        .sidebar-bottom { padding: 15px; }
-
-        .settings-btn {
-            width: 100%;
-            padding: 12px;
-            border-radius: 8px;
-            background: transparent;
-            border: none;
-            color: var(--text-main);
-            text-align: left;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 0.95rem;
-            transition: background 0.2s;
-        }
-        .settings-btn:hover { background: var(--sidebar-hover); }
-
-        /* ====== 聊天主区域 ====== */
-        .chat-container {
-            flex: 1;
-            background: var(--chat-bg);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .chat-header {
-            padding: 15px 20px;
-            color: var(--text-main);
-            font-size: 1.1rem;
-            font-weight: 600;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .chat-messages {
-            flex: 1;
-            padding: 20px 10%;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .message {
-            max-width: 85%;
-            padding: 14px 18px;
-            border-radius: 12px;
-            line-height: 1.6;
-            word-wrap: break-word;
-            font-size: 1rem;
-        }
-
-        .msg-user {
-            align-self: flex-end;
-            background-color: var(--user-bubble);
-            border-bottom-right-radius: 4px;
-        }
-
-        .msg-agent {
-            align-self: flex-start;
-            background-color: var(--agent-bubble);
-            border-bottom-left-radius: 4px;
-        }
-
-        .msg-agent p { margin: 0 0 10px 0; }
-        .msg-agent p:last-child { margin-bottom: 0; }
-        .msg-agent pre {
-            background: #282c34;
-            color: #abb2bf;
-            padding: 12px;
-            border-radius: 6px;
-            overflow-x: auto;
-            font-family: monospace;
-        }
-        .msg-agent code {
-            background: rgba(0,0,0,0.05);
-            padding: 2px 4px;
-            border-radius: 4px;
-            font-family: monospace;
-        }
-        .msg-agent pre code { background: none; padding: 0; }
-
-        .msg-agent table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0;
-            background-color: var(--chat-bg);
-        }
-        .msg-agent th, .msg-agent td {
-            border: 1px solid var(--border-color);
-            padding: 10px 12px;
-            text-align: left;
-        }
-        .msg-agent th {
-            background-color: rgba(0,0,0,0.03);
-            font-weight: 600;
-        }
-        .msg-agent tr:nth-child(even) {
-            background-color: rgba(0,0,0,0.01);
-        }
-
-        /* ====== 输入区域 ====== */
-        .chat-input-wrapper {
-            padding: 20px 10%;
-            background: linear-gradient(180deg, rgba(255,255,255,0) 0%, var(--chat-bg) 30%);
-        }
-
-        .chat-input {
-            display: flex;
-            align-items: center;
-            padding: 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            background: var(--bg-color);
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-        }
-
-        .upload-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 8px 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 8px;
-            transition: background 0.2s, color 0.2s;
-        }
-        .upload-btn:hover { background: var(--sidebar-hover); color: var(--primary-color); }
-        .upload-btn svg { width: 20px; height: 20px; fill: currentColor; }
-
-        .chat-input input {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            background: transparent;
-            color: var(--text-main);
-            outline: none;
-            font-size: 1rem;
-        }
-
-        .chat-input button.send-btn {
-            margin-left: 10px;
-            padding: 10px 20px;
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            font-size: 1rem;
-            transition: opacity 0.2s;
-        }
-        .chat-input button.send-btn:hover { opacity: 0.9; }
-
-        .loading {
-            align-self: flex-start;
-            color: var(--text-muted);
-            font-size: 0.9rem;
-            display: none;
-            margin-left: 10%;
-        }
-
-        /* ====== 模态框与下拉菜单 ====== */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-        }
-        .modal-content {
-            background: var(--chat-bg);
-            padding: 30px;
-            border-radius: 12px;
-            width: 90%;
-            max-width: 600px;
-            max-height: 80vh;
-            overflow-y: auto;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        }
-        .dropdown { position: relative; display: inline-block; }
-        .dropdown-content {
-            display: none;
-            position: absolute;
-            background-color: var(--chat-bg);
-            min-width: 120px;
-            box-shadow: 0px 4px 12px rgba(0,0,0,0.15);
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            z-index: 100;
-            overflow: hidden;
-        }
-        .dropdown-content button {
-            color: var(--text-main);
-            padding: 10px 15px;
-            text-decoration: none;
-            display: block;
-            width: 100%;
-            text-align: left;
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 0.9rem;
-            transition: background 0.2s;
-            white-space: nowrap;
-        }
-        .dropdown-content button:hover {
-            background-color: var(--sidebar-hover);
-        }
-        .dropdown.show .dropdown-content { display: block; }
-
-        #plusDropdown .dropdown-content {
-            top: auto;
-            bottom: calc(100% + 8px);
-            left: 0;
-            transform-origin: bottom left;
-            box-shadow: 0px -4px 16px rgba(0,0,0,0.15);
-            min-width: max-content;
-        }
-
-        .delete-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem; padding: 0 5px; transition: color 0.2s; line-height: 1; }
-        .delete-btn:hover { color: #ff4d4f; }
-
-        .modal-header { font-size: 1.3rem; font-weight: bold; margin-bottom: 20px; color: var(--text-main); }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; color: var(--text-main); font-size: 0.9rem; }
-        .form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-color); color: var(--text-main); font-size: 1rem; }
-        .form-group textarea { min-height: 150px; resize: vertical; font-family: inherit; }
-        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
-        .modal-actions button { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; transition: opacity 0.2s; }
-        .btn-cancel { background: var(--border-color); color: var(--text-main); }
-        .btn-submit { background: var(--primary-color); color: white; }
-        .data-section { margin-bottom: 25px; }
-        .data-section h3 { margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.1rem; }
-        .data-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
-        .data-table th, .data-table td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); }
-        .data-table th { background: var(--bg-color); font-weight: 600; }
-        .empty-state { text-align: center; color: var(--text-muted); padding: 20px; }
-        .stat-card { background: var(--bg-color); padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-        .stat-card h4 { margin: 0 0 10px 0; color: var(--text-main); font-size: 0.95rem; }
-        .stat-value { font-size: 1.5rem; font-weight: bold; color: var(--primary-color); }
-    </style>
+    <!-- Import modular CSS -->
+    <link rel="stylesheet" href="/css/variables.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
 </head>
 <body>
 
 <div class="app-container">
     <div class="sidebar">
         <div class="sidebar-top">
-            <button class="new-chat-btn" onclick="startNewChat()">
+            <button class="new-chat-btn" id="btnNewChat">
                 <span>+ 新对话</span>
                 <span style="color: var(--text-muted);">K</span>
             </button>
@@ -416,7 +35,7 @@
         </div>
 
         <div class="sidebar-bottom">
-            <button class="settings-btn" onclick="showMaintenanceModal()" title="系统维护">
+            <button class="settings-btn" id="btnMaintenance" title="系统维护">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="3"></circle>
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -440,23 +59,25 @@
         <div class="chat-input-wrapper">
             <div class="chat-input">
                 <div class="dropdown" id="plusDropdown">
-                    <button class="upload-btn" onclick="toggleMainDropdown(event)" title="更多操作">
+                    <button class="upload-btn" id="btnMoreOptions" title="更多操作">
                         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </button>
                     <div class="dropdown-content">
-                        <button onclick="openUploadModal()">📂 上传知识库</button>
-                        <button onclick="openPromptModal()">🌟 修改提示词</button>
+                        <button id="btnOpenUploadModal">📂 上传知识库</button>
+                        <button id="btnOpenGitModal">🐈 Git 导入</button>
+                        <button id="btnOpenPromptModal">🌟 修改提示词</button>
                     </div>
                 </div>
-                <input type="text" id="userInput" placeholder="输入你想问的问题..." onkeypress="handleEnter(event)">
-                <button class="send-btn" onclick="sendMessage()">发送</button>
+                <input type="text" id="userInput" placeholder="输入你想问的问题...">
+                <button class="send-btn" id="btnSend">发送</button>
             </div>
         </div>
     </div>
 </div>
 
+<!-- Modals -->
 <div class="modal" id="uploadModal">
     <div class="modal-content" style="max-width: 500px;">
         <div class="modal-header">📂 上传知识库</div>
@@ -473,8 +94,30 @@
             <textarea id="knowledgeText" placeholder="输入知识库文本..." style="min-height: 150px;"></textarea>
         </div>
         <div class="modal-actions">
-            <button class="btn-cancel" onclick="closeUploadModal()">取消</button>
-            <button class="btn-submit" onclick="uploadKnowledge()">上传</button>
+            <button class="btn-cancel">取消</button>
+            <button class="btn-submit" id="btnConfirmUpload">上传</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="gitModal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">🐈 Git 导入知识库</div>
+        <div class="form-group">
+            <label>Git 仓库链接 *</label>
+            <input type="text" id="gitRepoUrl" placeholder="例如: https://github.com/user/repo" required>
+        </div>
+        <div class="form-group">
+            <label>分支名称</label>
+            <input type="text" id="gitBranch" placeholder="默认: main" value="main">
+        </div>
+        <div class="form-group">
+            <label>知识标签 (可选)</label>
+            <input type="text" id="gitKnowledgeTag" placeholder="例如: repo_docs">
+        </div>
+        <div class="modal-actions">
+            <button class="btn-cancel">取消</button>
+            <button class="btn-submit" id="btnConfirmGit">导入</button>
         </div>
     </div>
 </div>
@@ -489,8 +132,8 @@
             <textarea id="systemPromptInput" style="min-height: 200px; font-family: monospace; font-size: 0.95rem;"></textarea>
         </div>
         <div class="modal-actions">
-            <button class="btn-cancel" onclick="closePromptModal()">取消</button>
-            <button class="btn-submit" onclick="saveSystemPrompt()">保存</button>
+            <button class="btn-cancel">取消</button>
+            <button class="btn-submit" id="btnConfirmPrompt">保存</button>
         </div>
     </div>
 </div>
@@ -507,19 +150,8 @@
             <div id="redisData">加载中...</div>
         </div>
         <div class="modal-actions">
-            <button class="btn-cancel" onclick="closeMaintenanceModal()">关闭</button>
-            <button class="btn-submit" onclick="refreshMaintenanceData()">刷新</button>
-        </div>
-    </div>
-</div>
-
-<div class="modal" id="infoModal">
-    <div class="modal-content" style="max-width: 400px; text-align: center;">
-        <div class="modal-header" id="infoTitle">提示</div>
-        <div id="infoMessage" style="margin-bottom: 25px; color: var(--text-main); line-height: 1.5;"></div>
-        <div class="modal-actions" style="justify-content: center; gap: 15px;">
-            <button class="btn-cancel" id="infoCancelBtn" onclick="closeInfoModal()">取消</button>
-            <button class="btn-submit" id="infoConfirmBtn" style="min-width: 80px;">确定</button>
+            <button class="btn-cancel">关闭</button>
+            <button class="btn-submit" id="btnRefreshMaintenance">刷新</button>
         </div>
     </div>
 </div>
@@ -532,8 +164,8 @@
             <input type="text" id="renameInput" placeholder="请输入新的对话名称">
         </div>
         <div class="modal-actions">
-            <button class="btn-cancel" onclick="closeRenameModal()">取消</button>
-            <button class="btn-submit" onclick="confirmRename()">确定</button>
+            <button class="btn-cancel">取消</button>
+            <button class="btn-submit" id="btnConfirmRename">确定</button>
         </div>
     </div>
 </div>
@@ -545,508 +177,13 @@
             确定要删除这段对话吗？此操作不可恢复。
         </div>
         <div class="modal-actions">
-            <button class="btn-cancel" onclick="closeDeleteModal()">取消</button>
-            <button class="btn-submit" onclick="confirmDelete()" style="background: #ff4d4f;">删除</button>
+            <button class="btn-cancel">取消</button>
+            <button class="btn-submit" id="btnConfirmDelete" style="background: #ff4d4f;">删除</button>
         </div>
     </div>
 </div>
 
-<script>
-    let sessionId = "";
-
-    marked.use(window.markedKatex({
-        throwOnError: false // 遇到语法错误时不崩溃，而是原样输出
-    }));
-
-    marked.setOptions({
-        breaks: true, // 支持回车换行
-        gfm: true
-    });
-
-    // 1. 加载侧边栏对话历史
-    async function loadHistorySessions() {
-        const container = document.getElementById('sessionList');
-        try {
-            const response = await fetch('/api/v1/sessions');
-            const resData = await response.json();
-
-            if (resData.code === "0000" && resData.data.length > 0) {
-                container.innerHTML = resData.data.map(sess => {
-                    const isActive = sess.id === sessionId ? 'active' : '';
-                    const title = sess.title || "未归档对话";
-
-                    return `
-                    <div class="history-item-container ${isActive}">
-                        <button class="history-item" onclick="switchSession('${sess.id}')" title="${title}">
-                            ${title}
-                        </button>
-                        <div class="dropdown">
-                            <span class="menu-dots" onclick="toggleSessionMenu(event, '${sess.id}')">⋮</span>
-                            <div class="dropdown-content" id="menu-${sess.id}" style="bottom: auto; top: 100%; left: auto; right: 0;">
-                                <button onclick="renameSessionPrompt('${sess.id}', '${title}')">✏️ 重命名</button>
-                                <button onclick="deleteSessionConfirm('${sess.id}')" style="color:#ff4d4f">🗑️ 删除</button>
-                            </div>
-                        </div>
-                    </div>
-                    `;
-                }).join('');
-            } else {
-                container.innerHTML = '<div class="empty-state" style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">暂无历史会话</div>';
-            }
-        } catch (error) {
-            container.innerHTML = '<div class="empty-state" style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">加载失败</div>';
-        }
-    }
-
-    // 清洗后端传回的 LLM ReAct 过程文本
-    function cleanMessageContent(content, role) {
-        if (role === 'user') {
-            const userQuestionMatch = content.match(/\[User Question\]\s*(.+?)$/s);
-            if (userQuestionMatch) return userQuestionMatch[1].trim();
-            return content;
-        } else if (role === 'assistant') {
-            const finishMatch = content.match(/Action:\s*Finish\[([\s\S]*)\]$/);
-            if (finishMatch) return finishMatch[1].trim();
-            return content;
-        }
-        return content;
-    }
-
-    // 2. 切换历史对话
-    async function switchSession(id, isInitialLoad = false) {
-        sessionId = id;
-        localStorage.setItem('currentSessionId', id);
-
-        if (!isInitialLoad) {
-            history.pushState({}, "", "/chat/" + id);
-        }
-
-        const chatBox = document.getElementById('chatBox');
-        chatBox.innerHTML = `<div class="message msg-agent">正在加载历史会话...</div>`;
-
-        try {
-            const response = await fetch(`/api/v1/session/${id}`);
-            const result = await response.json();
-
-            if (result.code === "0000" && result.data) {
-                chatBox.innerHTML = '';
-                const messages = result.data.messages || [];
-
-                messages.forEach(msg => {
-                    if (msg.role !== 'system' && !msg.content.startsWith('Observation:')) {
-                        const cleanedContent = cleanMessageContent(msg.content, msg.role);
-                        const msgDiv = document.createElement('div');
-
-                        const roleClass = msg.role === 'assistant' ? 'agent' : msg.role;
-                        msgDiv.className = `message msg-${roleClass}`;
-
-                        if (roleClass === 'agent') {
-                            let mathFormatted = cleanedContent
-                                .replace(/\\\\?\(\s*/g, ' $')
-                                .replace(/\s*\\\\?\)/g, '$ ')
-                                .replace(/\\\\?\[\s*/g, '\n$$\n')
-                                .replace(/\s*\\\\?\]/g, '\n$$\n');
-                            msgDiv.innerHTML = marked.parse(mathFormatted);
-                        } else {
-                            msgDiv.innerText = cleanedContent;
-                        }
-
-                        chatBox.appendChild(msgDiv);
-                    }
-                });
-
-                if (messages.filter(m => m.role !== 'system').length === 0) {
-                    chatBox.innerHTML = `<div class="message msg-agent">已切换至历史会话（暂无对话记录）</div>`;
-                }
-            } else {
-                chatBox.innerHTML = `<div class="message msg-agent">加载失败：${result.info || '会话不存在'}</div>`;
-            }
-        } catch (error) {
-            chatBox.innerHTML = `<div class="message msg-agent">加载失败：${error.message}</div>`;
-        }
-
-        chatBox.scrollTop = chatBox.scrollHeight;
-        loadHistorySessions();
-    }
-
-    // 3. 开启新对话
-    function startNewChat() {
-        sessionId = "session-" + Math.random().toString(36).substring(2, 9);
-        localStorage.setItem('currentSessionId', sessionId);
-        history.pushState({}, "", "/");
-        document.getElementById('chatBox').innerHTML = '<div class="message msg-agent">你好！我是 Kita，是一个具备逻辑思考能力的智能 AI 助手。有什么我可以帮你的吗？</div>';
-        loadHistorySessions();
-    }
-
-    window.onload = async function() {
-        await loadHistorySessions();
-
-        const path = window.location.pathname;
-        const match = path.match(/^\/chat\/(session-[a-zA-Z0-9\-]+)$/);
-
-        if (match) {
-            await switchSession(match[1], true);
-        } else {
-            startNewChat();
-        }
-    };
-
-    window.addEventListener('popstate', async (event) => {
-        const path = window.location.pathname;
-        const match = path.match(/^\/chat\/(session-[a-zA-Z0-9\-]+)$/);
-        if (match) {
-            await switchSession(match[1], true);
-        } else {
-            startNewChat();
-        }
-    });
-
-    function appendMessage(role, text) {
-        const chatBox = document.getElementById('chatBox');
-        const msgDiv = document.createElement('div');
-        msgDiv.className = `message msg-${role}`;
-
-        // 支持 Markdown 渲染 (含数学公式解析)
-        if (role === 'agent') {
-            let mathFormatted = text
-                .replace(/\\\\?\(\s*/g, ' $')
-                .replace(/\s*\\\\?\)/g, '$ ')
-                .replace(/\\\\?\[\s*/g, '\n$$\n')
-                .replace(/\s*\\\\?\]/g, '\n$$\n');
-            msgDiv.innerHTML = marked.parse(mathFormatted);
-        } else {
-            msgDiv.innerText = text;
-        }
-
-        chatBox.appendChild(msgDiv);
-        chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    let currentSystemPrompt = `你叫 Kita，是一个具备逻辑思考能力的智能 AI 助手。`;
-
-    // 4. 发送消息
-    async function sendMessage() {
-        const inputEle = document.getElementById('userInput');
-        const text = inputEle.value.trim();
-        if (!text) return;
-
-        currentSystemPrompt = document.getElementById('systemPromptInput').value.trim();
-
-        appendMessage('user', text);
-        inputEle.value = '';
-
-        const loadingTip = document.getElementById('loadingTip');
-        loadingTip.style.display = 'block';
-
-        try {
-            const response = await fetch('/api/v1/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    session_id: sessionId,
-                    user_input: text,
-                    system_prompt: currentSystemPrompt
-                })
-            });
-            const resData = await response.json();
-
-            if (resData.code === "0000") {
-                appendMessage('agent', resData.data);
-                loadHistorySessions();
-            } else {
-                appendMessage('agent', `❌ 错误: ${resData.info}`);
-            }
-        } catch (error) {
-            appendMessage('agent', `❌ 访问错误: ${error}`);
-        } finally {
-            loadingTip.style.display = 'none';
-        }
-    }
-
-    function handleEnter(e) {
-        if (e.key === 'Enter') sendMessage();
-    }
-
-    // 重命名模态框回车确认
-    document.addEventListener('DOMContentLoaded', function() {
-        const renameInput = document.getElementById('renameInput');
-        if (renameInput) {
-            renameInput.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') confirmRename();
-            });
-        }
-    });
-
-    /* ====== 侧边栏对话管理操作 ====== */
-
-    let pendingDeleteSessionId = null;
-    let pendingRenameSessionId = null;
-    let pendingRenameOldTitle = null;
-
-    // 删除历史会话
-    function deleteSessionConfirm(id) {
-        pendingDeleteSessionId = id;
-        document.getElementById('deleteModal').style.display = 'flex';
-    }
-
-    function closeDeleteModal() {
-        document.getElementById('deleteModal').style.display = 'none';
-        pendingDeleteSessionId = null;
-    }
-
-    async function confirmDelete() {
-        if (!pendingDeleteSessionId) return;
-
-        try {
-            await fetch(`/api/v1/session/${pendingDeleteSessionId}`, { method: 'DELETE' });
-            if (pendingDeleteSessionId === sessionId) {
-                startNewChat();
-            } else {
-                loadHistorySessions();
-            }
-            closeDeleteModal();
-        } catch (e) {
-            console.error("删除失败", e);
-            showInfoModal('错误', '删除失败，请稍后重试');
-        }
-    }
-
-    // 重命名历史会话
-    function renameSessionPrompt(id, oldTitle) {
-        pendingRenameSessionId = id;
-        pendingRenameOldTitle = oldTitle;
-        document.getElementById('renameInput').value = oldTitle;
-        document.getElementById('renameModal').style.display = 'flex';
-        setTimeout(() => {
-            document.getElementById('renameInput').focus();
-            document.getElementById('renameInput').select();
-        }, 100);
-    }
-
-    function closeRenameModal() {
-        document.getElementById('renameModal').style.display = 'none';
-        pendingRenameSessionId = null;
-        pendingRenameOldTitle = null;
-        document.getElementById('renameInput').value = '';
-    }
-
-    async function confirmRename() {
-        if (!pendingRenameSessionId) return;
-
-        const newTitle = document.getElementById('renameInput').value.trim();
-        if (!newTitle) {
-            showInfoModal('提示', '对话名称不能为空');
-            return;
-        }
-
-        if (newTitle === pendingRenameOldTitle) {
-            closeRenameModal();
-            return;
-        }
-
-        try {
-            await fetch('/api/v1/session/rename', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ session_id: pendingRenameSessionId, title: newTitle })
-            });
-            loadHistorySessions();
-            closeRenameModal();
-        } catch (e) {
-            console.error("重命名失败", e);
-            showInfoModal('错误', '重命名失败，请稍后重试');
-        }
-    }
-
-    function toggleSessionMenu(e, id) {
-        e.stopPropagation();
-        const menu = document.getElementById(`menu-${id}`);
-        const isShown = menu.style.display === 'block';
-
-        document.querySelectorAll('.dropdown-content').forEach(m => {
-            if (m.id.startsWith('menu-')) m.style.display = 'none';
-        });
-
-        if (!isShown) {
-            menu.style.display = 'block';
-        }
-    }
-
-    // 切换加号主下拉菜单
-    function toggleMainDropdown(event) {
-        event.stopPropagation();
-        document.getElementById("plusDropdown").classList.toggle("show");
-    }
-
-    // 全局点击监听（用于关闭所有下拉菜单）
-    window.addEventListener('click', function(event) {
-        if (!event.target.closest('#plusDropdown')) {
-            const dropdown = document.getElementById("plusDropdown");
-            if (dropdown && dropdown.classList.contains('show')) {
-                dropdown.classList.remove('show');
-            }
-        }
-        if (!event.target.matches('.menu-dots')) {
-            document.querySelectorAll('.dropdown-content').forEach(m => {
-                if (m.id && m.id.startsWith('menu-')) {
-                    m.style.display = 'none';
-                }
-            });
-        }
-    });
-
-    /* ====== 其他模态框逻辑 ====== */
-
-    function openUploadModal() {
-        document.getElementById("plusDropdown").classList.remove("show");
-        document.getElementById('uploadModal').style.display = 'flex';
-    }
-    function closeUploadModal() {
-        document.getElementById('uploadModal').style.display = 'none';
-        document.getElementById('knowledgeTag').value = '';
-        document.getElementById('sourceName').value = '';
-        document.getElementById('knowledgeText').value = '';
-    }
-    async function uploadKnowledge() {
-        const tag = document.getElementById('knowledgeTag').value.trim();
-        const sourceName = document.getElementById('sourceName').value.trim();
-        const text = document.getElementById('knowledgeText').value.trim();
-
-        if (!tag || !text) {
-            showInfoModal('提示', '请填写知识标签和知识内容');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/v1/knowledge/upsert', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tag: tag, source_name: sourceName || '用户上传', raw_text: text })
-            });
-            const resData = await response.json();
-
-            if (resData.code === "0000") {
-                showInfoModal('成功', '知识库上传成功！', false, () => {
-                    closeUploadModal();
-                });
-            } else {
-                showInfoModal('失败', `上传失败: ${resData.info}`);
-            }
-        } catch (error) {
-            showInfoModal('错误', `访问错误: ${error}`);
-        }
-    }
-
-    async function showMaintenanceModal() {
-        document.getElementById('maintenanceModal').style.display = 'flex';
-        await refreshMaintenanceData();
-    }
-    function closeMaintenanceModal() { document.getElementById('maintenanceModal').style.display = 'none'; }
-    async function refreshMaintenanceData() { await Promise.all([loadKnowledgeStats(), loadRedisData()]); }
-
-    async function loadKnowledgeStats() {
-        const container = document.getElementById('knowledgeStats');
-        container.innerHTML = '加载中...';
-        try {
-            const response = await fetch('/api/v1/maintenance/knowledge');
-            const resData = await response.json();
-            if (resData.code === "0000") {
-                const data = resData.data;
-                let html = `<div class="stat-card"><h4>总文档数</h4><div class="stat-value">${data.total_docs}</div></div>`;
-                if (data.tag_stats && data.tag_stats.length > 0) {
-                    html += '<table class="data-table"><thead><tr><th>标签</th><th>文档数</th><th>操作</th></tr></thead><tbody>';
-                    data.tag_stats.forEach(stat => {
-                        const tagName = stat.tag || 'N/A';
-                        const deleteAction = tagName !== 'N/A' ? `<button class="delete-btn" onclick="deleteKnowledgeTag('${tagName}')" title="删除此标签的所有文档">&times;</button>` : '';
-                        html += `<tr><td>${tagName}</td><td>${stat.count}</td><td>${deleteAction}</td></tr>`;
-                    });
-                    html += '</tbody></table>';
-                }
-                if (data.documents && data.documents.length > 0) {
-                    html += '<h4 style="margin-top: 20px;">最近文档</h4><table class="data-table"><thead><tr><th>内容预览</th><th>标签</th><th>来源</th></tr></thead><tbody>';
-                    data.documents.slice(0, 10).forEach(doc => {
-                        html += `<tr><td>${doc.content}</td><td>${doc.tag}</td><td>${doc.source}</td></tr>`;
-                    });
-                    html += '</tbody></table>';
-                }
-                container.innerHTML = html || '<div class="empty-state">暂无数据</div>';
-            } else { container.innerHTML = `<div class="empty-state">加载失败: ${resData.info}</div>`; }
-        } catch (error) { container.innerHTML = `<div class="empty-state">访问错误: ${error}</div>`; }
-    }
-
-    async function loadRedisData() {
-        const container = document.getElementById('redisData');
-        container.innerHTML = '加载中...';
-        try {
-            const response = await fetch('/api/v1/maintenance/redis');
-            const resData = await response.json();
-            if (resData.code === "0000") {
-                const sessions = resData.data;
-                let html = '';
-                if (sessions.length > 0) {
-                    html += `<div class="stat-card"><h4>活跃会话数</h4><div class="stat-value">${sessions.length}</div></div>`;
-                    html += '<table class="data-table"><thead><tr><th>Session ID</th><th>消息数</th><th>TTL (秒)</th></tr></thead><tbody>';
-                    sessions.forEach(session => {
-                        const hours = Math.floor(session.ttl / 3600);
-                        const minutes = Math.floor((session.ttl % 3600) / 60);
-                        html += `<tr><td>${session.session_id}</td><td>${session.message_count}</td><td>${hours}h ${minutes}m</td></tr>`;
-                    });
-                    html += '</tbody></table>';
-                } else { html = '<div class="empty-state">暂无活跃会话</div>'; }
-                container.innerHTML = html;
-            } else { container.innerHTML = `<div class="empty-state">加载失败: ${resData.info}</div>`; }
-        } catch (error) { container.innerHTML = `<div class="empty-state">访问错误: ${error}</div>`; }
-    }
-
-    function deleteKnowledgeTag(tag) {
-        showInfoModal('确认删除', `确定要删除标签为 "${tag}" 的所有知识文档吗？此操作不可恢复。`, true, async () => {
-            try {
-                const response = await fetch('/api/v1/knowledge/delete', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag: tag }) });
-                const resData = await response.json();
-                if (resData.code === "0000") showInfoModal('成功', `标签 "${tag}" 已成功删除，共清理了 ${resData.data} 个文档。`, false, () => { refreshMaintenanceData(); });
-                else showInfoModal('失败', `删除失败: ${resData.info}`);
-            } catch (error) { showInfoModal('错误', `访问错误: ${error}`); }
-        });
-    }
-
-    let infoCallback = null;
-    function showInfoModal(title, message, isConfirm = false, callback = null) {
-        document.getElementById('infoTitle').innerText = title;
-        document.getElementById('infoMessage').innerText = message;
-        document.getElementById('infoCancelBtn').style.display = isConfirm ? 'inline-block' : 'none';
-        infoCallback = callback;
-        document.getElementById('infoConfirmBtn').onclick = function() {
-            closeInfoModal();
-            if (infoCallback) infoCallback();
-        };
-        document.getElementById('infoModal').style.display = 'flex';
-    }
-    function closeInfoModal() { document.getElementById('infoModal').style.display = 'none'; }
-
-    async function openPromptModal() {
-        document.getElementById("plusDropdown").classList.remove("show");
-        const promptInput = document.getElementById('systemPromptInput');
-        try {
-            promptInput.value = '加载中...';
-            document.getElementById('promptModal').style.display = 'flex';
-            const res = await fetch(`/api/v1/prompt?session_id=${sessionId}`);
-            const data = await res.json();
-            if (data.code === "0000" && data.data) promptInput.value = data.data;
-            else promptInput.value = "你叫 Kita，是一个具备逻辑思考能力的智能 AI 助手。";
-        } catch(e) { promptInput.value = "你叫 Kita，是一个具备逻辑思考能力的智能 AI 助手。"; }
-    }
-    function closePromptModal() { document.getElementById('promptModal').style.display = 'none'; }
-    async function saveSystemPrompt() {
-        const promptText = document.getElementById('systemPromptInput').value.trim();
-        if (!promptText) { showInfoModal('提示', '提示词不能为空！'); return; }
-        try {
-            const response = await fetch('/api/v1/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_id: sessionId, system_prompt: promptText }) });
-            const resData = await response.json();
-            if (resData.code === "0000") showInfoModal('成功', '提示词已成功保存至 Redis，24小时内有效！', false, () => { closePromptModal(); });
-            else showInfoModal('失败', `保存失败: ${resData.info}`);
-        } catch(error) { showInfoModal('错误', `访问错误: ${error}`); }
-    }
-</script>
-
+<!-- Load Main App Logic -->
+<script type="module" src="/js/app.js"></script>
 </body>
 </html>

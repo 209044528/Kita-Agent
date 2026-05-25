@@ -185,7 +185,18 @@ class KnowledgeAppService:
         """
         # 1. 确定标签
         if not knowledge_tag:
-            knowledge_tag = repo_url.split("/")[-1].replace(".git", "")
+            # 优先从 URL 中提取仓库名作为标签，而不是 URL 的最后一部分（可能是分支名）
+            if "github.com" in repo_url:
+                # 移除末尾斜杠和 .git
+                clean_url = repo_url.rstrip("/").replace(".git", "")
+                if "/tree/" in clean_url:
+                    knowledge_tag = clean_url.split("/tree/")[0].split("/")[-1]
+                elif "/blob/" in clean_url:
+                    knowledge_tag = clean_url.split("/blob/")[0].split("/")[-1]
+                else:
+                    knowledge_tag = clean_url.split("/")[-1]
+            else:
+                knowledge_tag = repo_url.split("/")[-1].replace(".git", "")
 
         # 2. 调用解析器获取分块后的文档实体
         documents = self.git_parser.parse_repo(repo_url, branch)

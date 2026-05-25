@@ -1,0 +1,33 @@
+:root {
+    --bg-color: #f5f6f8;
+    --chat-bg: #ffffff;
+    --sidebar-bg: #f9f9f9;
+    --sidebar-hover: #ececec;
+    --text-main: #333333;
+    --text-muted: #888888;
+    --primary-color: #007bff;
+    --user-bubble: #e3f2fd;
+    --agent-bubble: #f1f3f5;
+    --border-color: #dddddd;
+    --sidebar-width: 260px;
+    --toast-bg: #333;
+    --toast-color: #fff;
+    --toast-success: #4caf50;
+    --toast-error: #f44336;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-color: #121212;
+        --chat-bg: #1e1e1e;
+        --sidebar-bg: #202123;
+        --sidebar-hover: #2a2b32;
+        --text-main: #e0e0e0;
+        --text-muted: #aaaaaa;
+        --primary-color: #3f51b5;
+        --user-bubble: #2c3e50;
+        --agent-bubble: #333333;
+        --border-color: #444444;
+        --toast-bg: #444;
+    }
+}
