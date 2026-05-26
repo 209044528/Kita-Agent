@@ -204,7 +204,7 @@ class KnowledgeAppService:
         # 3. 注入统一标签并入库
         for doc in documents:
             doc.metadata["knowledge_tag"] = knowledge_tag
-            # 这里的 ID 已经在 GitParser 中生成了（或者我们可以重新生成以保证幂等）
+            # 这里的 ID 已在 GitParser 中生成（或者可以重新生成以保证幂等）
             if not doc.id:
                 doc.id = hashlib.md5(doc.content.encode("utf-8")).hexdigest()
 

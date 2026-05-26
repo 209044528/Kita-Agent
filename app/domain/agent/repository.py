@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, AsyncGenerator
 
 if TYPE_CHECKING:
     from app.domain.agent.entity import AgentEntity
@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 
 class ILLMClient(ABC):
     @abstractmethod
-    async def chat(self, messages: list, model: str = None, **kwargs) -> str:
+    async def stream_chat(self, messages: list, model: str = None, **kwargs) -> AsyncGenerator[str, None]:
         pass
 
 

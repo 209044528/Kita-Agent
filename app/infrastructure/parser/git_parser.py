@@ -110,7 +110,7 @@ class GitRepositoryParser:
                         continue
                     
                     # 1. 后缀黑名单 (强制排除，大小写不敏感)
-                    if file_lower.endswith(('.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.tar.gz', '.pyc', '.exe', '.dll', '.so')):
+                    if file_lower.endswith(('.png', '.jpg', '.jpeg', '.gif', '.ico', '.zip', '.tar.gz', '.pyc', '.exe', '.dll', '.so')):
                         logger.info(f"跳过文件 (排除后缀): {relative_path}")
                         continue
 

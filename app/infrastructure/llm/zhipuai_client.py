@@ -1,32 +1,51 @@
+import asyncio
 from zhipuai import ZhipuAI
 from loguru import logger
+from typing import AsyncGenerator
 from app.core.config import settings
 from app.domain.agent.repository import ILLMClient
 
 class ZhipuAIClient(ILLMClient):
     def __init__(self):
-        self.client = ZhipuAI(api_key=settings.OPENAI_API_KEY)  # 智谱通常复用 OPENAI_API_KEY 变量
+        # 智谱 SDK 目前主要支持同步调用，我们在异步环境中使用 to_thread 包装
+        self.client = ZhipuAI(api_key=settings.OPENAI_API_KEY)
         self.default_model = settings.MODEL_NAME
 
-    async def chat(self, messages: list, model: str = None, **kwargs) -> str:
+    async def stream_chat(self, messages: list, model: str = None, **kwargs) -> AsyncGenerator[str, None]:
         target_model = model or self.default_model
-        
-        # 移除可能存在的提供商前缀
         if "/" in target_model:
             target_model = target_model.split("/")[-1]
 
         try:
-            logger.info(f"正在向 ZhipuAI SDK 发送请求, Model: {target_model}")
-            # 注意：ZhipuAI 的异步调用方式是 client.chat.asyncCompletions，
-            # 但通常我们使用同步调用配合 asyncio 运行，或者使用其提供的异步客户端。
-            # 这里为了简单直接使用同步调用（在异步环境下建议用 run_in_executor 或异步版本）
-            # 根据最新 SDK，支持 completions.create
-            response = self.client.chat.completions.create(
+            logger.info(f"正在向 ZhipuAI SDK 发送流式请求 (Sync in Thread), Model: {target_model}")
+            # 在线程中启动流式请求
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
                 model=target_model,
                 messages=messages,
+                stream=True,
                 **kwargs
             )
-            return response.choices[0].message.content or ""
+
+            # 迭代同步生成器
+            iterator = iter(response)
+
+            def safe_next():
+                try:
+                    return next(iterator)
+                except StopIteration:
+                    return None
+
+            while True:
+                chunk = await asyncio.to_thread(safe_next)
+                if chunk is None:
+                    break
+                
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield content
+
         except Exception as e:
-            logger.error(f"ZhipuAI 请求失败: {str(e)}")
-            return f"系统错误: {str(e)}"
+            logger.error(f"ZhipuAI 流式请求启动失败: {str(e)}")
+            yield f"系统错误: {str(e)}"
+

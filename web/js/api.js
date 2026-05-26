@@ -52,9 +52,12 @@ export const api = {
         fetchWithHandler(`/session/${sessionId}`, { method: 'DELETE' }),
 
     // Chat APIs
-    doChat: (sessionId, userInput, systemPrompt) => 
-        fetchWithHandler('/chat', {
+    doStreamChat: (sessionId, userInput, systemPrompt) =>
+        fetch(`${CONFIG.API_BASE}/chat/stream`, {
             method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
             body: JSON.stringify({
                 session_id: sessionId,
                 user_input: userInput,

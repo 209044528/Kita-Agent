@@ -1,7 +1,7 @@
 import re
 from loguru import logger
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, AsyncGenerator
 from app.domain.agent.repository import ILLMClient
 from app.domain.agent.tool import ToolRegistry
 
@@ -21,106 +21,108 @@ class AgentEntity(BaseModel):
         if self.system_prompt and not self.messages:
             self.messages.append({"role": "system", "content": self.system_prompt})
 
-    async def process_chat(
+    async def stream_chat(
         self,
         user_input: str,
         llm_client: ILLMClient,
         model_name: Optional[str] = None,
         original_user_input: Optional[str] = None,
         tool_registry: Optional[ToolRegistry] = None
-    ) -> str:
+    ) -> AsyncGenerator[str, None]:
         """
-        处理对话，执行 ReAct 推理循环
-
-        Args:
-            user_input: 用户输入
-            llm_client: LLM 客户端实例
-            model_name: 指定模型名称
-            original_user_input: 用户的原始问题
-            tool_registry: 工具注册中心
+        流式处理对话，执行 ReAct 推理循环并逐块产出内容
+        仅产出 Finish[...] 中的最终答案。
         """
-        # 存储用户输入到历史记录
         display_input = original_user_input if original_user_input else user_input
         self.messages.append({"role": "user", "content": display_input})
-
-        # 构建工作消息列表
         working_messages = self.messages.copy()
 
         for step in range(5):
-            logger.info(f"[内部思考 第 {step + 1} 步]")
+            logger.info(f"[流式内部思考 第 {step + 1} 步]")
+            
+            # 实时反馈：展示当前步骤，避免用户焦虑
+            if step == 0:
+                yield "💡 正在思考... "
+            else:
+                yield f"\n🔍 正在进行第 {step + 1} 步搜索... "
 
-            # 获取 LLM 回答
-            reply = await llm_client.chat(working_messages, model=model_name)
+            full_reply = ""
+            finish_found = False
+            finish_marker_pos = -1
+            last_yield_pos = -1
 
-            logger.info(f"AI 输出: {reply}")
+            async for chunk in llm_client.stream_chat(working_messages, model=model_name):
+                full_reply += chunk
+                
+                if not finish_found:
+                    # 灵活匹配 Action: Finish[
+                    match = re.search(r"Action:\s*Finish\[", full_reply, re.IGNORECASE)
+                    if match:
+                        finish_found = True
+                        finish_marker_pos = match.end()
+                        last_yield_pos = finish_marker_pos
+                        # 首次发现 Finish 时，如果是新起一行，可以做个换行处理
+                        yield "\n" 
+                
+                if finish_found:
+                    # 提取 Finish[ 之后到当前末尾的内容
+                    content_so_far = full_reply[last_yield_pos:]
+                    
+                    # 检查是否有结束括号
+                    if "]" in content_so_far:
+                        content_so_far = content_so_far[:content_so_far.find("]")]
+                    
+                    if content_so_far:
+                        yield content_so_far
+                        last_yield_pos += len(content_so_far)
+            
+            working_messages.append({"role": "assistant", "content": full_reply})
 
-            working_messages.append({"role": "assistant", "content": reply})
-
-            # 解析 1: 检查是否结束思考 (使用贪婪匹配解决嵌套方括号问题)
-            finish_match = re.search(r"Action:\s*Finish\[(.*)\]", reply, re.DOTALL)
+            # 解析 1: 检查是否结束思考 (保留原有解析逻辑用于循环控制)
+            finish_match = re.search(r"Action:\s*Finish\[(.*)\]", full_reply, re.DOTALL)
             if finish_match:
                 final_answer = finish_match.group(1).strip()
-                # 只保存最终答案到历史记录
                 self.messages.append({"role": "assistant", "content": final_answer})
-                return final_answer
+                return
 
-            elif re.search(r"Action:\s*Finish", reply, re.IGNORECASE):
-                # 备选解析方案：寻找最后一个 ']'
-                parts = re.split(r"Action:\s*Finish", reply, flags=re.IGNORECASE)
+            elif re.search(r"Action:\s*Finish", full_reply, re.IGNORECASE):
+                # 备选解析
+                parts = re.split(r"Action:\s*Finish", full_reply, flags=re.IGNORECASE)
                 content = parts[-1].strip()
-                if content.startswith("["):
-                    end_idx = content.rfind("]")
-                    if end_idx != -1:
-                        final_answer = content[1:end_idx].strip()
-                    else:
-                        final_answer = content[1:].strip()
-                else:
-                    final_answer = content.replace("]", "").strip()
-
+                final_answer = content[1:-1].strip() if content.startswith("[") else content.strip("]")
                 self.messages.append({"role": "assistant", "content": final_answer})
-                return final_answer
+                return
 
-            # 解析 2: 检查是否需要调用工具 (同样改为贪婪匹配，支持多行和嵌套圆括号)
-            tool_match = re.search(r"Action:\s*(\w+)\((.*)\)", reply, re.DOTALL)
+            # 解析 2: 检查是否需要调用工具
+            tool_match = re.search(r"Action:\s*(\w+)\((.*)\)", full_reply, re.DOTALL)
             if tool_match:
                 tool_name = tool_match.group(1)
                 args_str = tool_match.group(2).strip()
 
-                # 解析参数（支持 query 和 tag）
                 tool_args = {}
                 query_match = re.search(r'query\s*=\s*"([^"]*)"', args_str)
                 tag_match = re.search(r'tag\s*=\s*"([^"]*)"', args_str)
-
-                if query_match:
-                    tool_args['query'] = query_match.group(1)
-                if tag_match:
-                    tool_args['tag'] = tag_match.group(1)
-
+                if query_match: tool_args['query'] = query_match.group(1)
+                if tag_match: tool_args['tag'] = tag_match.group(1)
+                
                 observation_result = self._execute_tool(tool_name, tool_args, tool_registry)
-                logger.info(f"[工具执行]: 调用 {tool_name}, 参数: {tool_args}, 结果: {observation_result}")
+                logger.info(f"[工具执行]: {tool_name} -> {observation_result}")
 
+                yield " ✓ 已找到相关信息\n"
                 working_messages.append({"role": "user", "content": f"Observation: {observation_result}"})
                 continue
 
-            logger.warning("[系统警告]: AI 输出格式不规范，强制纠正")
-            working_messages.append(
-                {"role": "user", "content": "Observation: 错误，请严格按照 'Thought: ... Action: ...' 格式输出。"})
+            # 异常处理
+            logger.warning(f"[系统警告]: AI 第 {step+1} 步输出格式不规范")
+            working_messages.append({"role": "user", "content": "Observation: 错误，请严格按照 'Thought: ... Action: ...' 格式输出。"})
 
-        error_msg = "❌ Kita 思考了太多次都没有得出结果，任务已强制终止。"
+        error_msg = "\n❌ Kita 思考了太多次都没有得出结果，任务已强制终止。"
+        yield error_msg
         self.messages.append({"role": "assistant", "content": error_msg})
-        return error_msg
 
     def _execute_tool(self, tool_name: str, tool_args: dict, tool_registry: Optional[ToolRegistry] = None) -> str:
         """
         内部工具执行器，通过 ToolRegistry 动态路由
-
-        Args:
-            tool_name: 工具名称
-            tool_args: 工具参数
-            tool_registry: 工具注册中心
-
-        Returns:
-            工具执行结果
         """
         if not tool_registry:
             return "错误: 工具注册中心未初始化，无法执行工具调用。"

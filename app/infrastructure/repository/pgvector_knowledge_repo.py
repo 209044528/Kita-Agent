@@ -1,5 +1,4 @@
 from typing import List
-from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
 from langchain_core.documents import Document as LangchainDocument
 from langchain_ollama import OllamaEmbeddings

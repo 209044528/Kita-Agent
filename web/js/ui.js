@@ -55,17 +55,28 @@ export const ui = {
         msgDiv.className = `message msg-${role}`;
         
         if (role === 'agent') {
-            let mathFormatted = text
-                .replace(/\\\\?\(\s*/g, ' $')
-                .replace(/\s*\\\\?\)/g, '$ ')
-                .replace(/\\\\?\[\s*/g, '\n$$\n')
-                .replace(/\s*\\\\?\]/g, '\n$$\n');
-            msgDiv.innerHTML = marked.parse(mathFormatted);
+            msgDiv.innerHTML = this.renderMarkdown(text);
         } else {
             msgDiv.innerText = text;
         }
         
         chatBox.appendChild(msgDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        return msgDiv;
+    },
+
+    renderMarkdown(text) {
+        let mathFormatted = text
+            .replace(/\\\\?\(\s*/g, ' $')
+            .replace(/\s*\\\\?\)/g, '$ ')
+            .replace(/\\\\?\[\s*/g, '\n$$\n')
+            .replace(/\s*\\\\?\]/g, '\n$$\n');
+        return marked.parse(mathFormatted);
+    },
+
+    updateMessage(msgDiv, text) {
+        msgDiv.innerHTML = this.renderMarkdown(text);
+        const chatBox = document.getElementById('chatBox');
         chatBox.scrollTop = chatBox.scrollHeight;
     },
 
@@ -125,14 +136,66 @@ export const ui = {
         const loadingTip = document.getElementById('loadingTip');
         loadingTip.style.display = 'block';
 
+        // 创建一个空的 Agent 消息框用于流式填充
+        const agentMsgDiv = this.appendMessage('agent', '');
+        agentMsgDiv.classList.add('streaming-cursor');
+        let fullReply = "";
+
         try {
-            const reply = await api.doChat(state.getSessionId(), text, state.getSystemPrompt());
-            this.appendMessage('agent', reply);
+            console.log("开始流式请求...");
+            const response = await api.doStreamChat(state.getSessionId(), text, state.getSystemPrompt());
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.info || '网络请求失败');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            
+            loadingTip.style.display = 'none';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                
+                // 留下最后一个可能不完整的行在 buffer 中
+                buffer = lines.pop();
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine.startsWith('data: ')) {
+                        const dataStr = trimmedLine.slice(6).trim();
+                        if (dataStr === '[DONE]') {
+                            console.log("流式请求完成");
+                            break;
+                        }
+                        
+                        try {
+                            const data = JSON.parse(dataStr);
+                            if (data.content) {
+                                fullReply += data.content;
+                                this.updateMessage(agentMsgDiv, fullReply);
+                            }
+                        } catch (e) {
+                            console.error("解析 SSE JSON 失败:", e, "原始数据:", dataStr);
+                        }
+                    }
+                }
+            }
+            
             this.loadHistorySessions();
         } catch (error) {
-            // Toast will handle error display
+            console.error("流式对话出错:", error);
+            agentMsgDiv.innerText = `系统错误: ${error.message}`;
+            Toast.error(`对话失败: ${error.message}`);
         } finally {
             loadingTip.style.display = 'none';
+            agentMsgDiv.classList.remove('streaming-cursor');
         }
     },
 

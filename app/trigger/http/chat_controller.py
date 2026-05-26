@@ -1,4 +1,6 @@
+import json
 from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi.responses import StreamingResponse
 from app.types.request.chat_request import ChatRequestDTO
 from app.core.rate_limit import rate_limit_by_ip
 from app.types.request.knowledge_request import KnowledgeUpsertRequestDTO
@@ -118,21 +120,30 @@ def get_session_history(
     })
 
 
-@router.post("/chat", response_model=Response[str])
-async def chat(
-    request: ChatRequestDTO, 
+@router.post("/chat/stream")
+async def chat_stream(
+    request: ChatRequestDTO,
     _: None = Depends(rate_limit_by_ip),
     chat_app_service: ChatAppService = Depends(get_chat_service)
 ):
-    """智能体对话接口"""
-    reply = await chat_app_service.do_chat(
-        session_id=request.session_id,
-        user_input=request.user_input,
-        model_name=request.model_name,
-        system_prompt=request.system_prompt,
-    )
+    """智能体流式对话接口 (SSE)"""
+    async def event_generator():
+        try:
+            async for chunk in chat_app_service.do_stream_chat(
+                session_id=request.session_id,
+                user_input=request.user_input,
+                model_name=request.model_name,
+                system_prompt=request.system_prompt,
+            ):
+                # 遵循 SSE 格式: data: {"content": "..."}\n\n
+                yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"流式对话异常: {str(e)}")
+            yield f"data: {json.dumps({'content': f'系统错误: {str(e)}'}, ensure_ascii=False)}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
 
-    return Response.success(data=reply)
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 class PromptRequestDTO(BaseModel):
     session_id: str = Field(..., description="用户会话ID")
