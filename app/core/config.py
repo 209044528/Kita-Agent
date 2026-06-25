@@ -26,6 +26,10 @@ class Settings(BaseSettings):
 
     LANGCHAIN_TRACING_V2: str = "false"
     LANGCHAIN_PROJECT: str = "kita-agent"
+    OBSERVABILITY_ENABLED: bool = True
+    TRACE_PATH: str = "logs/agent_traces.jsonl"
+    BAD_CASE_PATH: str = "logs/bad_cases.jsonl"
+    MCP_ENABLED: bool = False
 
     @property
     def pg_database_url(self) -> str:

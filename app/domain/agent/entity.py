@@ -1,22 +1,24 @@
-import re
+from __future__ import annotations
+
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
 from loguru import logger
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, AsyncGenerator
+
 from app.domain.agent.repository import ILLMClient
 from app.domain.agent.tool import ToolRegistry
+from app.domain.agent.tool_call import ToolCallParser
 
 
 class AgentEntity(BaseModel):
-    """
-    Agent 聚合根 (充血模型)
-    自带 ReAct 推理循环逻辑。
-    """
+    """Agent aggregate with a bounded ReAct loop."""
+
     session_id: str
     title: str = ""
     system_prompt: str = ""
     messages: List[Dict[str, str]] = Field(default_factory=list)
 
-    def __init__(self, **data):
+    def __init__(self, **data: Any):
         super().__init__(**data)
         if self.system_prompt and not self.messages:
             self.messages.append({"role": "system", "content": self.system_prompt})
@@ -27,104 +29,122 @@ class AgentEntity(BaseModel):
         llm_client: ILLMClient,
         model_name: Optional[str] = None,
         original_user_input: Optional[str] = None,
-        tool_registry: Optional[ToolRegistry] = None
+        tool_registry: Optional[ToolRegistry] = None,
+        observability: Any = None,
+        max_steps: int = 5,
     ) -> AsyncGenerator[str, None]:
-        """
-        流式处理对话，执行 ReAct 推理循环并逐块产出内容
-        仅产出 Finish[...] 中的最终答案。
-        """
-        display_input = original_user_input if original_user_input else user_input
+        display_input = original_user_input or user_input
         self.messages.append({"role": "user", "content": display_input})
         working_messages = self.messages.copy()
+        parser = ToolCallParser()
+        trace_id = (
+            observability.start_trace(self.session_id, display_input, model_name)
+            if observability
+            else None
+        )
 
-        for step in range(5):
-            logger.info(f"[流式内部思考 第 {step + 1} 步]")
-            
-            # 实时反馈：展示当前步骤，避免用户焦虑
-            if step == 0:
-                yield "💡 正在思考... "
-            else:
-                yield f"\n🔍 正在进行第 {step + 1} 步搜索... "
+        for step in range(1, max_steps + 1):
+            logger.info("[Agent step] session={} step={}", self.session_id, step)
+            yield "💡 正在思考... " if step == 1 else f"\n🔎 正在进行第 {step} 步检索... "
 
             full_reply = ""
-            finish_found = False
-            finish_marker_pos = -1
-            last_yield_pos = -1
-
             async for chunk in llm_client.stream_chat(working_messages, model=model_name):
                 full_reply += chunk
-                
-                if not finish_found:
-                    # 灵活匹配 Action: Finish[
-                    match = re.search(r"Action:\s*Finish\[", full_reply, re.IGNORECASE)
-                    if match:
-                        finish_found = True
-                        finish_marker_pos = match.end()
-                        last_yield_pos = finish_marker_pos
-                        # 首次发现 Finish 时，如果是新起一行，可以做个换行处理
-                        yield "\n" 
-                
-                if finish_found:
-                    # 提取 Finish[ 之后到当前末尾的内容
-                    content_so_far = full_reply[last_yield_pos:]
-                    
-                    # 检查是否有结束括号
-                    if "]" in content_so_far:
-                        content_so_far = content_so_far[:content_so_far.find("]")]
-                    
-                    if content_so_far:
-                        yield content_so_far
-                        last_yield_pos += len(content_so_far)
-            
+
             working_messages.append({"role": "assistant", "content": full_reply})
+            if observability:
+                observability.record_event(
+                    trace_id=trace_id,
+                    session_id=self.session_id,
+                    event_type="model_output",
+                    step=step,
+                    payload={"output": full_reply, "model": model_name},
+                )
 
-            # 解析 1: 检查是否结束思考 (保留原有解析逻辑用于循环控制)
-            finish_match = re.search(r"Action:\s*Finish\[(.*)\]", full_reply, re.DOTALL)
-            if finish_match:
-                final_answer = finish_match.group(1).strip()
-                self.messages.append({"role": "assistant", "content": final_answer})
-                return
-
-            elif re.search(r"Action:\s*Finish", full_reply, re.IGNORECASE):
-                # 备选解析
-                parts = re.split(r"Action:\s*Finish", full_reply, flags=re.IGNORECASE)
-                content = parts[-1].strip()
-                final_answer = content[1:-1].strip() if content.startswith("[") else content.strip("]")
-                self.messages.append({"role": "assistant", "content": final_answer})
-                return
-
-            # 解析 2: 检查是否需要调用工具
-            tool_match = re.search(r"Action:\s*(\w+)\((.*)\)", full_reply, re.DOTALL)
-            if tool_match:
-                tool_name = tool_match.group(1)
-                args_str = tool_match.group(2).strip()
-
-                tool_args = {}
-                query_match = re.search(r'query\s*=\s*"([^"]*)"', args_str)
-                tag_match = re.search(r'tag\s*=\s*"([^"]*)"', args_str)
-                if query_match: tool_args['query'] = query_match.group(1)
-                if tag_match: tool_args['tag'] = tag_match.group(1)
-                
-                observation_result = self._execute_tool(tool_name, tool_args, tool_registry)
-                logger.info(f"[工具执行]: {tool_name} -> {observation_result}")
-
-                yield " ✓ 已找到相关信息\n"
-                working_messages.append({"role": "user", "content": f"Observation: {observation_result}"})
+            try:
+                action = parser.parse(full_reply)
+            except ValueError as exc:
+                logger.warning("[Agent parse failure] step={} error={}", step, exc)
+                if observability:
+                    observability.record_bad_case(
+                        category="tool_call_parse_failure",
+                        session_id=self.session_id,
+                        trace_id=trace_id,
+                        input_text=display_input,
+                        detail=str(exc),
+                        model_output=full_reply,
+                    )
+                working_messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Observation: 输出无法解析。请只返回一个合法 JSON 对象，"
+                            "字段为 tool、arguments，可选 thought。"
+                        ),
+                    }
+                )
                 continue
 
-            # 异常处理
-            logger.warning(f"[系统警告]: AI 第 {step+1} 步输出格式不规范")
-            working_messages.append({"role": "user", "content": "Observation: 错误，请严格按照 'Thought: ... Action: ...' 格式输出。"})
+            if action.is_finish:
+                final_answer = action.final_answer or ""
+                yield f"\n{final_answer}"
+                self.messages.append({"role": "assistant", "content": final_answer})
+                if observability:
+                    observability.finish_trace(
+                        trace_id, self.session_id, final_answer, step, success=True
+                    )
+                return
 
-        error_msg = "\n❌ Kita 思考了太多次都没有得出结果，任务已强制终止。"
+            observation = self._execute_tool(
+                action.tool,
+                action.arguments,
+                tool_registry,
+                trace_id=trace_id,
+                step=step,
+            )
+            logger.info("[Tool execution] {} -> {}", action.tool, observation)
+            yield " ✅ 已完成工具调用\n"
+            working_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Observation: "
+                        + observation
+                        + "\n请继续按结构化动作协议输出下一个 JSON 对象。"
+                    ),
+                }
+            )
+
+        error_msg = "\n❌ Kita 达到最大推理步数，任务已终止。"
         yield error_msg
         self.messages.append({"role": "assistant", "content": error_msg})
+        if observability:
+            observability.record_bad_case(
+                category="max_steps_exceeded",
+                session_id=self.session_id,
+                trace_id=trace_id,
+                input_text=display_input,
+                detail=f"Exceeded {max_steps} steps",
+            )
+            observability.finish_trace(
+                trace_id, self.session_id, error_msg, max_steps, success=False
+            )
 
-    def _execute_tool(self, tool_name: str, tool_args: dict, tool_registry: Optional[ToolRegistry] = None) -> str:
-        """
-        内部工具执行器，通过 ToolRegistry 动态路由
-        """
+    def _execute_tool(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        tool_registry: Optional[ToolRegistry] = None,
+        *,
+        trace_id: str | None = None,
+        step: int | None = None,
+    ) -> str:
         if not tool_registry:
-            return "错误: 工具注册中心未初始化，无法执行工具调用。"
-
-        return tool_registry.execute(tool_name, tool_args)
+            return "错误: 工具注册中心未初始化。"
+        return tool_registry.execute(
+            tool_name,
+            tool_args,
+            session_id=self.session_id,
+            trace_id=trace_id,
+            step=step,
+        )

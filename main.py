@@ -6,13 +6,17 @@ os.environ["LITELLM_TELEMETRY"] = "False"
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 import mimetypes
+from contextlib import asynccontextmanager
 from loguru import logger
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.trigger.http import chat_controller, maintenance_controller
+from app.trigger.http import chat_controller, maintenance_controller, observability_controller
 from app.core.exceptions import KitaBaseException
+from app.core.config import settings
+from app.core.container import get_tool_registry
+from app.infrastructure.mcp import create_mcp_server
 from app.types.response import Response
 import uvicorn
 
@@ -41,10 +45,30 @@ logger.add(
     enqueue=True           # 异步写入
 )
 
+mcp_server = None
+mcp_app = None
+if settings.MCP_ENABLED:
+    try:
+        mcp_server = create_mcp_server(get_tool_registry())
+        mcp_app = mcp_server.streamable_http_app()
+    except RuntimeError as exc:
+        logger.warning(str(exc))
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    if mcp_server:
+        async with mcp_server.session_manager.run():
+            yield
+    else:
+        yield
+
+
 app = FastAPI(
     title="Kita-Agent API",
     description="基于 DDD 架构的 ReAct 智能体服务",
-    version="1.0.0"
+    version="1.1.0",
+    lifespan=lifespan,
 )
 
 # --- 2. 全局异常处理 ---
@@ -84,6 +108,17 @@ async def chat_page(session_id: str):
 
 app.include_router(chat_controller.router, prefix="/api/v1", tags=["Agent Chat"])
 app.include_router(maintenance_controller.router, prefix="/api/v1", tags=["Maintenance"])
+app.include_router(observability_controller.router, prefix="/api/v1", tags=["Observability"])
+if mcp_app:
+    @app.api_route(
+        "/mcp",
+        methods=["GET", "POST", "DELETE"],
+        include_in_schema=False,
+    )
+    async def redirect_mcp():
+        return RedirectResponse(url="/mcp/", status_code=307)
+
+    app.mount("/mcp", mcp_app, name="mcp")
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
 
 if __name__ == "__main__":

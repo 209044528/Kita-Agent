@@ -14,14 +14,16 @@ class ChatAppService:
         self, 
         llm_client: ILLMClient, 
         agent_repo: IAgentRepository,
-        knowledge_service: KnowledgeAppService | None = None
+        knowledge_service: KnowledgeAppService | None = None,
+        observability=None,
     ):
         self.llm_client = llm_client
         self.agent_repo = agent_repo
         self.knowledge_service = knowledge_service
+        self.observability = observability
 
         # 初始化工具注册中心
-        self.tool_registry = ToolRegistry()
+        self.tool_registry = ToolRegistry(observability=observability)
         if knowledge_service:
             self.tool_registry.register(KnowledgeSearchTool(knowledge_service))
 
@@ -58,7 +60,8 @@ class ChatAppService:
             user_input,
             self.llm_client,
             model_name=model_name,
-            tool_registry=self.tool_registry
+            tool_registry=self.tool_registry,
+            observability=self.observability,
         ):
             full_reply_content += chunk
             yield chunk

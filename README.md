@@ -19,11 +19,8 @@ Kita-Agent 是一个基于 **ReAct 推理循环 + RAG 知识库 + FastAPI SSE �
 - [项目结构](#项目结构)
 - [快速启动](#快速启动)
 - [环境变量](#环境变量)
-- [API 示例](#api-示例)
-- [工具调用轨迹示例](#工具调用轨迹示例)
-- [失败重规划案例](#失败重规划案例)
 - [日志与维护](#日志与维护)
-- [后续规划](#后续规划)
+- [已完成的工程化升级](#已完成的工程化升级)
 
 ---
 
@@ -32,17 +29,24 @@ Kita-Agent 是一个基于 **ReAct 推理循环 + RAG 知识库 + FastAPI SSE �
 ### 1. 手写 ReAct 推理循环
 
 项目在领域层实现 Agent 聚合根，由 Agent 自身维护多轮消息、系统提示词和 ReAct 推理过程。  
-模型每轮必须输出：
+模型每轮输出一个结构化动作：
 
-```text
-Thought: 当前思考
-Action: 工具调用或 Finish[最终回答]
+```json
+{
+  "thought": "需要检索知识库",
+  "tool": "knowledge_search",
+  "arguments": {
+    "query": "ReAct Agent",
+    "tag": "agent-basic"
+  }
+}
 ```
 
-Agent 根据 `Action` 判断下一步：
+最终回答使用 `tool: "finish"` 和 `arguments.answer`。Agent 优先解析 JSON，
+同时兼容旧版 `Action: knowledge_search(...)` / `Finish[...]`：
 
-- `Action: knowledge_search(query="...")`：调用知识库检索工具；
-- `Action: Finish[...]`：结束推理并返回最终回答；
+- JSON Schema 校验失败：写入 Observation 纠偏提示；
+- 未知工具或执行失败：返回可观测的结构化错误；
 - 输出格式异常：写入 Observation 纠偏提示，要求模型重新按格式输出；
 - 超过最大推理步数：强制终止，避免无限循环。
 
@@ -57,6 +61,7 @@ Agent 根据 `Action` 判断下一步：
 - Agent 只关心工具名称和参数，不直接依赖具体实现；
 - 工具调用前进行参数校验；
 - 工具执行失败时返回结构化错误信息，进入下一轮 ReAct 纠偏。
+- 同一份注册信息可生成 JSON Schema、OpenAI Function Calling 定义和 MCP Tool。
 
 当前已接入：
 
@@ -176,14 +181,14 @@ sequenceDiagram
     User->>API: POST /api/v1/chat/stream
     API->>App: do_stream_chat(session_id, user_input)
     App->>Agent: 加载会话 / 构建系统提示词
-    Agent->>LLM: 请求下一步 Thought + Action
-    LLM-->>Agent: Action: knowledge_search(...)
+    Agent->>LLM: 请求下一步结构化动作
+    LLM-->>Agent: {"tool":"knowledge_search","arguments":{...}}
     Agent->>Tool: execute("knowledge_search", args)
     Tool->>KB: retrieve_knowledge(query, tag)
     KB-->>Tool: 检索上下文
     Tool-->>Agent: Observation
     Agent->>LLM: 携带 Observation 继续推理
-    LLM-->>Agent: Action: Finish[最终回答]
+    LLM-->>Agent: {"tool":"finish","arguments":{"answer":"..."}}
     Agent-->>API: SSE 流式返回内容
     API-->>User: data: {"content": "..."}
 ```
@@ -198,6 +203,8 @@ sequenceDiagram
 | Agent 范式 | ReAct |
 | LLM 接入 | LiteLLM、OpenAI 兼容接口、Ollama、本地 Qwen |
 | RAG | MarkdownHeaderTextSplitter、RecursiveCharacterTextSplitter、向量检索、reranker |
+| 工具协议 | JSON Schema、Function Calling、MCP Streamable HTTP / stdio |
+| 可观测性 | JSONL Trace、工具耗时指标、bad case、RAG 评测 |
 | 数据存储 | Redis、PostgreSQL / pgvector |
 | 工具机制 | BaseTool、ToolRegistry、参数校验 |
 | 前端 | 原生 Web 静态页面 |
@@ -413,17 +420,11 @@ docker exec -it kita-db-pgvector psql -U postgres -d ai-rag-knowledge \
 
 ---
 
-## 后续规划
+## 工程化升级
 
 ### 1. 结构化工具调用
 
-当前工具调用主要通过正则解析：
-
-```text
-Action: knowledge_search(query="...")
-```
-
-后续可以升级为 JSON Schema / Function Calling 风格：
+工具调用已升级为 JSON Schema 风格：
 
 ```json
 {
@@ -435,53 +436,48 @@ Action: knowledge_search(query="...")
 }
 ```
 
-这样可以降低解析失败率，并提升复杂工具参数的可维护性。
+`ToolRegistry.definitions()` 可输出通用定义，`openai_tools()` 可输出
+Function Calling 定义。旧版正则格式仍作为兼容回退。
 
 ---
 
 ### 2. MCP Server 接入
 
-将现有工具注册机制改造为 MCP Server，使 Kita-Agent 的知识库检索、代码检索、视觉检测等工具可以被外部 Agent 客户端标准化调用。
+现有 `ToolRegistry` 已通过官方 MCP Python SDK 暴露，新增工具后会自动进入 MCP Tool 列表。
+
+```bash
+pip install -r requirements-mcp.txt
+
+# stdio
+python mcp_server.py
+
+# 独立 Streamable HTTP，默认地址 http://127.0.0.1:8000/
+python mcp_server.py --transport streamable-http
+```
+
+在 `.env` 中设置 `MCP_ENABLED=true`，还可将 Streamable HTTP 挂载到主服务
+`http://localhost:8000/mcp`。
 
 ---
 
-### 3. 具身智能扩展
+### 3. 评测与可观测性
 
-在当前 ReAct + ToolRegistry 基础上增加具身任务工具：
+当前已提供：
 
-```text
-vision_detect(object="tennis_ball")
-world_model_update(object_id="tennis_ball_1", status="visible")
-robot_action(action="scan")
-robot_action(action="grasp")
-```
-
-扩展后可形成：
+- Agent 轨迹 JSONL 持久化：`logs/agent_traces.jsonl`；
+- 工具调用次数、错误数和平均耗时统计；
+- 知识检索在线命中率与离线关键字评测；
+- 解析失败、最大步数等 bad case 收集；
+- `unittest` 单元测试；
+- 指标、轨迹和 RAG 评测 HTTP 接口。
 
 ```text
-自然语言任务
-  -> Agent 规划
-  -> 视觉检测
-  -> World Model 更新
-  -> 动作工具调用
-  -> 执行反馈
-  -> 失败重规划
+GET  /api/v1/observability/metrics
+GET  /api/v1/observability/traces?session_id=...
+POST /api/v1/evaluation/rag
 ```
 
-这可以进一步对齐 Embodied Agent / Agent OS 场景。
-
----
-
-### 4. 评测与可观测性
-
-后续可增加：
-
-- Agent 轨迹持久化；
-- 工具调用耗时统计；
-- RAG 命中率评估；
-- bad case 收集；
-- 单元测试与集成测试；
-- OpenTelemetry / LangSmith 类观测能力。
+下一阶段可接入 OTLP Exporter、LangSmith Dataset 和基于语义相关性的评测器。
 
 ---
 

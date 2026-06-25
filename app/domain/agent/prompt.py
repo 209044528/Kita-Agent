@@ -1,34 +1,37 @@
-DEFAULT_PERSONA_PROMPT = "你叫 Kita，逻辑型AI助手。风格简明，除非用户要求详细。回答须基于知识库。"
+DEFAULT_PERSONA_PROMPT = (
+    "你叫 Kita，是逻辑型 AI 助手。风格简明，除非用户要求详细。"
+    "涉及知识库内容时，回答须基于工具检索结果。"
+)
 
 
 def build_react_instruction_prompt(tool_descriptions: str) -> str:
-    """
-    构建 ReAct 指令提示词
+    instruction = """
+【结构化动作协议】
+每一轮只输出一个 JSON 对象，不要使用 Markdown 代码块，也不要输出 JSON 之外的文字。
 
-    Args:
-        tool_descriptions: 工具描述字符串（由 ToolRegistry 生成）
+调用工具：
+{
+  "thought": "简短说明为什么调用该工具",
+  "tool": "knowledge_search",
+  "arguments": {
+    "query": "Agent 定义",
+    "tag": "agent-basic"
+  }
+}
 
-    Returns:
-        完整的 ReAct 指令提示词
-    """
-    base_instruction = """
-【回复格式】每轮必须包含：
-Thought: 思考过程
-Action: 执行动作
+返回最终答案：
+{
+  "thought": "已获得足够信息",
+  "tool": "finish",
+  "arguments": {
+    "answer": "最终回答"
+  }
+}
 
-【Action 两种格式】
-- 调用工具：工具名(参数="值")
-- 给答案：Finish[最终回答]（回答须基于知识库结果，写在方括号内）
-
-示例：
-Thought: 用户问Agent定义，应先查知识库。
-Action: knowledge_search(query="Agent定义")
-
-Thought: 知识库已返回内容。
-Action: Finish[Agent是能感知环境、决策并执行动作的智能体。]
+要求：
+1. tool 必须是可用工具名或 finish。
+2. arguments 必须符合对应 JSON Schema。
+3. 不要泄露冗长思维过程，thought 只写简短决策摘要。
+4. 旧版 Action: tool(...) / Finish[...] 仅用于兼容，不应主动生成。
 """
-
-    if tool_descriptions:
-        return f"{tool_descriptions}\n{base_instruction}"
-    else:
-        return base_instruction
+    return f"{tool_descriptions}\n{instruction}" if tool_descriptions else instruction

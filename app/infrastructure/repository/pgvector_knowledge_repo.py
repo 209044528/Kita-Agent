@@ -9,21 +9,23 @@ from app.domain.knowledge.repository import IKnowledgeRepository, DocumentEntity
 
 class PgVectorKnowledgeRepository(IKnowledgeRepository):
     def __init__(self):
-        self.embeddings = OllamaEmbeddings(
-            base_url=settings.OLLAMA_BASE_URL,
-            model=settings.OLLAMA_EMBEDDING_MODEL
-        )
-        # self.embeddings = OpenAIEmbeddings(
-        #     model="text-embedding-3-small"
-        # )
+        self._vector_store = None
 
-        # 初始化 LangChain 的 PGVector
-        self.vector_store = PGVector(
-            embeddings=self.embeddings,
-            collection_name=settings.PG_VECTOR_COLLECTION_NAME,
-            connection=settings.pg_database_url,
-            use_jsonb=True,
-        )
+    @property
+    def vector_store(self) -> PGVector:
+        """Connect to embedding/database services only on first real use."""
+        if self._vector_store is None:
+            embeddings = OllamaEmbeddings(
+                base_url=settings.OLLAMA_BASE_URL,
+                model=settings.OLLAMA_EMBEDDING_MODEL,
+            )
+            self._vector_store = PGVector(
+                embeddings=embeddings,
+                collection_name=settings.PG_VECTOR_COLLECTION_NAME,
+                connection=settings.pg_database_url,
+                use_jsonb=True,
+            )
+        return self._vector_store
 
     def add_documents(self, documents: List[DocumentEntity]) -> None:
         # 将领域实体转换为 LangChain 文档格式，并提取唯一 ID
