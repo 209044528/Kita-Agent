@@ -1,6 +1,6 @@
-import { ui, state } from './ui.js';
-import { api } from './api.js';
-import { Toast, generateSessionId } from './utils.js';
+import { ui, state } from './ui.js?v=20260626-typewriter';
+import { api } from './api.js?v=20260626-typewriter';
+import { Toast, generateSessionId } from './utils.js?v=20260626-typewriter';
 
 // Setup marked.js configurations
 if (window.marked && window.markedKatex) {

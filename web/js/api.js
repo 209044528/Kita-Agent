@@ -8,9 +8,32 @@ class ApiError extends Error {
     }
 }
 
+function authHeaders() {
+    const apiKey = localStorage.getItem('kitaApiKey');
+    return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+}
+
+async function requestWithAuth(url, options = {}, retryAuth = true) {
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            ...authHeaders(),
+            ...options.headers
+        }
+    });
+    if (response.status === 401 && retryAuth) {
+        const apiKey = window.prompt('请输入 Kita-Agent API Key');
+        if (apiKey) {
+            localStorage.setItem('kitaApiKey', apiKey.trim());
+            return requestWithAuth(url, options, false);
+        }
+    }
+    return response;
+}
+
 async function fetchWithHandler(url, options = {}) {
     try {
-        const response = await fetch(`${CONFIG.API_BASE}${url}`, {
+        const response = await requestWithAuth(`${CONFIG.API_BASE}${url}`, {
             ...options,
             headers: {
                 'Content-Type': 'application/json',
@@ -53,7 +76,7 @@ export const api = {
 
     // Chat APIs
     doStreamChat: (sessionId, userInput, systemPrompt) =>
-        fetch(`${CONFIG.API_BASE}/chat/stream`, {
+        requestWithAuth(`${CONFIG.API_BASE}/chat/stream`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -63,6 +86,11 @@ export const api = {
                 user_input: userInput,
                 system_prompt: systemPrompt
             })
+        }),
+
+    cancelTask: (taskId) =>
+        fetchWithHandler(`/chat/tasks/${encodeURIComponent(taskId)}/cancel`, {
+            method: 'POST'
         }),
         
     savePrompt: (sessionId, systemPrompt) =>

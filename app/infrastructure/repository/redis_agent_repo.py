@@ -11,18 +11,22 @@ class RedisAgentRepository(IAgentRepository):
         self.client = redis.from_url(settings.REDIS_URL, decode_responses=True)
         self.ttl = settings.SESSION_TTL
 
-    def _get_key(self, session_id: str) -> str:
-        return f"kita:agent:session:{session_id}"
+    def _get_key(self, session_id: str, user_id: str = "anonymous") -> str:
+        return f"kita:agent:session:{user_id}:{session_id}"
 
-    def get(self, session_id: str) -> Optional[AgentEntity]:
+    def get(self, session_id: str, user_id: str = "anonymous") -> Optional[AgentEntity]:
         """从 Redis 获取 Agent 实体"""
-        data = self.client.get(self._get_key(session_id))
+        data = self.client.get(self._get_key(session_id, user_id))
+        if not data and user_id == "anonymous":
+            data = self.client.get(f"kita:agent:session:{session_id}")
         if data and data.strip():
-            # 利用 Pydantic 的能力直接从 JSON 重建实体
-            return AgentEntity.model_validate_json(data)
+            agent = AgentEntity.model_validate_json(data)
+            if agent.owner_user_id != user_id:
+                return None
+            return agent
         return None
 
-    def save(self, agent: AgentEntity) -> None:
+    def save(self, agent: AgentEntity, user_id: str = "anonymous") -> None:
         """保存 Agent 实体到 Redis，并刷新过期时间"""
         # 序列化为 JSON 字符串
         data = agent.model_dump_json()
@@ -30,28 +34,30 @@ class RedisAgentRepository(IAgentRepository):
 
         # 使用 setex 设置键值对的同时设置过期时间
         self.client.setex(
-            name=self._get_key(session_id),
+            name=self._get_key(session_id, user_id),
             time=self.ttl,
             value=data
         )
 
-    def delete(self, session_id: str) -> None:
+    def delete(self, session_id: str, user_id: str = "anonymous") -> None:
         """手动清理会话"""
-        self.client.delete(self._get_key(session_id))
+        self.client.delete(self._get_key(session_id, user_id))
 
-    def list_sessions(self) -> List[str]:
+    def list_sessions(self, user_id: str = "anonymous") -> List[str]:
         """获取所有会话 ID 列表"""
-        keys = self.client.keys("kita:agent:session:*")
+        keys = self.client.scan_iter(f"kita:agent:session:{user_id}:*")
         return [k.split(":")[-1] for k in keys]
 
-    def save_prompt(self, session_id: str, prompt: str) -> None:
+    def save_prompt(
+        self, session_id: str, prompt: str, user_id: str = "anonymous"
+    ) -> None:
         """保存自定义提示词到 Redis，默认 24 小时 (86400秒) 过期"""
         self.client.setex(
-            name=f"kita:prompt:{session_id}",
+            name=f"kita:prompt:{user_id}:{session_id}",
             time=86400,  # 24小时
             value=prompt
         )
 
-    def get_prompt(self, session_id: str) -> Optional[str]:
+    def get_prompt(self, session_id: str, user_id: str = "anonymous") -> Optional[str]:
         """从 Redis 获取该会话的自定义提示词"""
-        return self.client.get(f"kita:prompt:{session_id}")
+        return self.client.get(f"kita:prompt:{user_id}:{session_id}")

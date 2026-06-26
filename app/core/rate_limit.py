@@ -1,4 +1,5 @@
 import time
+import uuid
 from fastapi import Request, HTTPException
 from redis import Redis
 from app.core.config import settings
@@ -25,7 +26,8 @@ async def rate_limit_by_ip(request: Request, max_requests: int = 10, window_seco
 
     pipe = redis_client.pipeline()
     pipe.zremrangebyscore(rate_limit_key, 0, window_start)
-    pipe.zadd(rate_limit_key, {str(current_time): current_time})
+    member = f"{current_time}:{uuid.uuid4().hex}"
+    pipe.zadd(rate_limit_key, {member: current_time})
     pipe.zcard(rate_limit_key)
     pipe.expire(rate_limit_key, window_seconds)
 

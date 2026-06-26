@@ -1,27 +1,33 @@
+from __future__ import annotations
+
 import hashlib
-from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
-from app.domain.knowledge.repository import IKnowledgeRepository, DocumentEntity
-from typing import List
+import math
+import re
+from typing import Iterable, List
+
 import httpx
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from loguru import logger
+
 from app.core.config import settings
-
-
+from app.domain.knowledge.repository import (
+    DocumentEntity,
+    IKnowledgeRepository,
+    RetrievedChunk,
+)
 from app.infrastructure.parser.git_parser import GitRepositoryParser
 
 
 class KnowledgeAppService:
     def __init__(
-        self, 
-        knowledge_repo: IKnowledgeRepository, 
+        self,
+        knowledge_repo: IKnowledgeRepository,
         use_model_reranker: bool = False,
-        git_parser: GitRepositoryParser | None = None
+        git_parser: GitRepositoryParser | None = None,
     ):
         self.knowledge_repo = knowledge_repo
         self.use_model_reranker = use_model_reranker
         self.git_parser = git_parser or GitRepositoryParser()
-
-        # 混合切分策略：先按 Markdown 标题切分，再细粒度切分
         self.markdown_splitter = MarkdownHeaderTextSplitter(
             headers_to_split_on=[
                 ("#", "Header 1"),
@@ -29,185 +35,408 @@ class KnowledgeAppService:
                 ("###", "Header 3"),
             ]
         )
-
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=400,
             chunk_overlap=50,
-            separators=["\n\n", "\n", "。", "！", "？", " ", ""]
+            separators=["\n\n", "\n", "。", "；", "，", " ", ""],
         )
 
-    def process_and_store_text(self, raw_text: str, tag: str, source_name: str) -> None:
-        """
-        处理原始文本：混合切分策略 -> 附加元数据 -> 向量化入库
-        混合策略：先按 Markdown 标题层级切分，再进行细粒度切分
-        """
-        # 1. 混合文本切分
-        # 第一步：尝试按 Markdown 标题切分
-        try:
-            md_chunks = self.markdown_splitter.split_text(raw_text)
-            # 第二步：对每个 Markdown 块进行细粒度切分
-            chunks = []
-            for md_doc in md_chunks:
-                # 保留 Markdown 标题元数据
-                header_metadata = md_doc.metadata if hasattr(md_doc, 'metadata') else {}
-                content = md_doc.page_content if hasattr(md_doc, 'page_content') else md_doc
-
-                # 细粒度切分 (递归切分)
-                sub_chunks = self.text_splitter.split_text(content)
-                for sub_chunk in sub_chunks:
-                    # 仅添加细粒度切分后的子块，不添加 md_chunks 父块
-                    chunks.append((sub_chunk, header_metadata))
-        except Exception as e:
-            logger.warning(f"Markdown splitting failed or skipped: {str(e)}. Falling back to recursive splitting.")
-            # 如果不是 Markdown 格式或切分失败，直接使用细粒度切分
-            sub_chunks = self.text_splitter.split_text(raw_text)
-            chunks = [(chunk, {}) for chunk in sub_chunks]
-
-        # 2. 构建领域实体并注入元数据 (知识打标 + Markdown 标题信息 + 唯一哈希)
+    def process_and_store_text(
+        self,
+        raw_text: str,
+        tag: str,
+        source_name: str,
+        *,
+        user_id: str = "anonymous",
+        visibility: str = "public",
+        allowed_user_ids: list[str] | None = None,
+        knowledge_dir: str | None = None,
+    ) -> None:
+        """Split text into chunks and persist them with ownership/provenance metadata."""
+        chunks = self._split_text(raw_text)
         documents = []
-        for chunk_content, header_meta in chunks:
-            # 生成内容的唯一 MD5 指纹作为 ID，用于幂等去重
-            chunk_id = hashlib.md5(chunk_content.encode("utf-8")).hexdigest()
-            
+        allowed_user_ids = allowed_user_ids or []
+
+        for index, (chunk_content, header_meta) in enumerate(chunks):
+            chunk_hash = hashlib.md5(
+                f"{tag}:{source_name}:{index}:{chunk_content}".encode("utf-8")
+            ).hexdigest()
             metadata = {
                 "knowledge_tag": tag,
                 "source": source_name,
-                "chunk_hash": chunk_id,
-                **header_meta  # 合并 Markdown 标题元数据
+                "chunk_hash": chunk_hash,
+                "chunk_index": index,
+                "owner_user_id": user_id,
+                "visibility": visibility,
+                "allowed_user_ids": allowed_user_ids,
+                "knowledge_dir": knowledge_dir or "",
+                **header_meta,
             }
-            doc = DocumentEntity(
-                content=chunk_content,
-                metadata=metadata,
-                id=chunk_id
+            documents.append(
+                DocumentEntity(content=chunk_content, metadata=metadata, id=chunk_hash)
             )
-            documents.append(doc)
-
-        # 3. 持久化到向量数据库
-        self.knowledge_repo.add_documents(documents)
-
-    def retrieve_knowledge(self, user_query: str, tag: str = None, initial_top_k: int = 15, final_top_k: int = 3) -> str:
-        """
-        检索知识并组装成上下文字符串
-        采用两阶段检索：粗排（扩大召回）+ 重排（精准筛选）
-
-        Args:
-            user_query: 用户查询
-            tag: 知识标签过滤（可选）
-            initial_top_k: 粗排阶段召回数量，默认 15
-            final_top_k: 重排后最终返回数量，默认 3
-        """
-        filters = {"knowledge_tag": tag} if tag else None
-
-        # 第一阶段：粗排 - 扩大召回范围
-        docs = self.knowledge_repo.similarity_search(
-            query=user_query,
-            top_k=initial_top_k,
-            filter_kwargs=filters
-        )
-
-        if not docs:
-            return ""
-
-        # 第二阶段：重排 - 使用远程 BGE-Reranker 服务
-        if self.use_model_reranker:
-            reranked_docs = self._rerank_with_model(user_query, docs, final_top_k)
-        else:
-            reranked_docs = docs[:final_top_k]
-
-        # 提取文本内容进行拼接
-        context = "\n---\n".join([doc.content for doc in reranked_docs])
-        return context
-
-    def _rerank_with_model(self, query: str, documents: List[DocumentEntity], top_k: int) -> List[DocumentEntity]:
-        """
-        使用远程 BGE-Reranker 服务进行重排
-
-        通过 HTTP 请求调用独立部署的 Reranker 微服务
-        服务地址由环境变量 RERANKER_API_URL 配置
-        """
-        try:
-            # 构建请求数据
-            payload = {
-                "query": query,
-                "documents": [doc.content for doc in documents],
-                "return_documents": False
-            }
-
-            # 发送 HTTP POST 请求到 Reranker 服务
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(settings.RERANKER_API_URL, json=payload)
-                response.raise_for_status()
-
-            # 解析返回结果
-            result = response.json()
-            results = result.get("results", [])
-
-            if not results or len(results) != len(documents):
-                logger.warning(f"Reranker returned invalid results (len={len(results)} vs docs={len(documents)}), falling back to original order")
-                return documents[:top_k]
-
-            # 检查 API 是否返回了 index
-            # 如果有 index，直接按 index 映射文档
-            if "index" in results[0]:
-                reranked_docs = []
-                for item in results:
-                    idx = item["index"]
-                    if 0 <= idx < len(documents):
-                        reranked_docs.append(documents[idx])
-                return reranked_docs[:top_k]
-
-            # 如果 API 只返回了分数且没有 index，假设分数列表与输入文档顺序一致
-            # 优先匹配 "score" 或 "relevance_score" 字段
-            scores = []
-            for item in results:
-                s = item.get("score")
-                if s is None:
-                    s = item.get("relevance_score", 0)
-                scores.append(s)
-
-            scored_docs = list(zip(scores, documents))
-            scored_docs.sort(key=lambda x: x[0], reverse=True)
-
-            return [doc for _, doc in scored_docs[:top_k]]
-        except Exception as e:
-            logger.error(f"Error calling reranker service at {settings.RERANKER_API_URL}: {str(e)}. Falling back to original order. Please check if the reranker service is running and accessible.")
-            return documents[:top_k]
-
-    def delete_knowledge_by_tag(self, tag: str) -> int:
-        """
-        根据标签删除知识库内容，返回删除的文档数量
-        """
-        return self.knowledge_repo.delete_by_tag(tag)
-
-    def ingest_git_repo(self, repo_url: str, branch: str = "main", knowledge_tag: str = None) -> None:
-        """
-        解析 Git 仓库并向量化入库
-        """
-        # 1. 确定标签
-        if not knowledge_tag:
-            # 优先从 URL 中提取仓库名作为标签，而不是 URL 的最后一部分（可能是分支名）
-            if "github.com" in repo_url:
-                # 移除末尾斜杠和 .git
-                clean_url = repo_url.rstrip("/").replace(".git", "")
-                if "/tree/" in clean_url:
-                    knowledge_tag = clean_url.split("/tree/")[0].split("/")[-1]
-                elif "/blob/" in clean_url:
-                    knowledge_tag = clean_url.split("/blob/")[0].split("/")[-1]
-                else:
-                    knowledge_tag = clean_url.split("/")[-1]
-            else:
-                knowledge_tag = repo_url.split("/")[-1].replace(".git", "")
-
-        # 2. 调用解析器获取分块后的文档实体
-        documents = self.git_parser.parse_repo(repo_url, branch)
-
-        # 3. 注入统一标签并入库
-        for doc in documents:
-            doc.metadata["knowledge_tag"] = knowledge_tag
-            # 这里的 ID 已在 GitParser 中生成（或者可以重新生成以保证幂等）
-            if not doc.id:
-                doc.id = hashlib.md5(doc.content.encode("utf-8")).hexdigest()
 
         if documents:
             self.knowledge_repo.add_documents(documents)
-            logger.info(f"Git 仓库 {repo_url} 入库成功，标签: {knowledge_tag}")
+
+    def retrieve_knowledge(
+        self,
+        user_query: str,
+        tag: str | None = None,
+        initial_top_k: int = 15,
+        final_top_k: int = 3,
+        *,
+        user_id: str = "anonymous",
+        is_admin: bool = False,
+        knowledge_dir: str | None = None,
+        include_citations: bool = True,
+        channels: list[str] | None = None,
+    ) -> str:
+        """Backward-compatible text context retrieval."""
+        chunks = self.retrieve_chunks(
+            user_query=user_query,
+            tag=tag,
+            initial_top_k=initial_top_k,
+            final_top_k=final_top_k,
+            user_id=user_id,
+            is_admin=is_admin,
+            knowledge_dir=knowledge_dir,
+            channels=channels,
+        )
+        return self.format_retrieved_chunks(chunks, include_citations=include_citations)
+
+    def retrieve_chunks(
+        self,
+        user_query: str,
+        tag: str | None = None,
+        initial_top_k: int = 15,
+        final_top_k: int = 3,
+        *,
+        user_id: str = "anonymous",
+        is_admin: bool = False,
+        knowledge_dir: str | None = None,
+        channels: list[str] | None = None,
+    ) -> list[RetrievedChunk]:
+        """Multi-channel RAG pipeline with structured chunks and provenance."""
+        if not user_query or not user_query.strip():
+            return []
+
+        channels = channels or ["vector", "keyword"]
+        filters = self._metadata_filter(tag=tag, knowledge_dir=knowledge_dir)
+        query_plan = self._rewrite_and_split_query(user_query)
+        candidates: dict[str, RetrievedChunk] = {}
+        fetch_k = max(initial_top_k, final_top_k * 4)
+
+        for query in query_plan:
+            if "vector" in channels:
+                try:
+                    for doc, raw_score in self.knowledge_repo.similarity_search_with_score(
+                        query=query,
+                        top_k=fetch_k,
+                        filter_kwargs=filters,
+                    ):
+                        self._merge_candidate(
+                            candidates, doc, channel="vector", raw_score=float(raw_score)
+                        )
+                except Exception as exc:
+                    logger.warning("Vector retrieval failed for query={!r}: {}", query, exc)
+
+            if "keyword" in channels:
+                try:
+                    for doc, raw_score in self.knowledge_repo.keyword_search(
+                        query=query,
+                        top_k=fetch_k,
+                        filter_kwargs=filters,
+                    ):
+                        self._merge_candidate(
+                            candidates, doc, channel="keyword", raw_score=float(raw_score)
+                        )
+                except Exception as exc:
+                    logger.warning("Keyword retrieval failed for query={!r}: {}", query, exc)
+
+        visible = [
+            chunk
+            for chunk in candidates.values()
+            if self._passes_access_filter(
+                chunk.metadata,
+                user_id=user_id,
+                is_admin=is_admin,
+                knowledge_dir=knowledge_dir,
+            )
+        ]
+        if not visible:
+            return []
+
+        self._normalize_and_score(visible)
+        visible.sort(key=lambda chunk: chunk.score, reverse=True)
+        rerank_pool = visible[: max(initial_top_k, final_top_k)]
+        if self.use_model_reranker:
+            rerank_pool = self._rerank_chunks_with_model(user_query, rerank_pool)
+
+        rerank_pool.sort(key=lambda chunk: chunk.score, reverse=True)
+        final_chunks = rerank_pool[:final_top_k]
+        for index, chunk in enumerate(final_chunks, start=1):
+            chunk.provenance["citation_index"] = index
+        return final_chunks
+
+    def format_retrieved_chunks(
+        self, chunks: list[RetrievedChunk], *, include_citations: bool = True
+    ) -> str:
+        if not chunks:
+            return ""
+        parts = []
+        for index, chunk in enumerate(chunks, start=1):
+            citation = f"[{index}] " if include_citations else ""
+            source_bits = [
+                f"source={chunk.source or 'unknown'}",
+                f"tag={chunk.tag or 'N/A'}",
+                f"dir={chunk.knowledge_dir or '/'}",
+                f"score={chunk.score:.3f}",
+                f"channels={','.join(chunk.channels)}",
+            ]
+            parts.append(
+                f"{citation}{chunk.content}\n"
+                f"来源: {' | '.join(source_bits)} | chunk_id={chunk.id}"
+            )
+        return "\n---\n".join(parts)
+
+    def delete_knowledge_by_tag(self, tag: str) -> int:
+        return self.knowledge_repo.delete_by_tag(tag)
+
+    def ingest_git_repo(
+        self,
+        repo_url: str,
+        branch: str = "main",
+        knowledge_tag: str | None = None,
+        *,
+        user_id: str = "anonymous",
+        visibility: str = "public",
+        allowed_user_ids: list[str] | None = None,
+        knowledge_dir: str | None = None,
+    ) -> None:
+        if not knowledge_tag:
+            clean_url = repo_url.rstrip("/").replace(".git", "")
+            if "github.com" in clean_url and ("/tree/" in clean_url or "/blob/" in clean_url):
+                clean_url = clean_url.split("/tree/")[0].split("/blob/")[0]
+            knowledge_tag = clean_url.split("/")[-1]
+
+        documents = self.git_parser.parse_repo(repo_url, branch)
+        allowed_user_ids = allowed_user_ids or []
+        for index, doc in enumerate(documents):
+            chunk_hash = doc.id or hashlib.md5(
+                f"{knowledge_tag}:{repo_url}:{index}:{doc.content}".encode("utf-8")
+            ).hexdigest()
+            doc.id = chunk_hash
+            doc.metadata.update(
+                {
+                    "knowledge_tag": knowledge_tag,
+                    "source": doc.metadata.get("source") or repo_url,
+                    "chunk_hash": chunk_hash,
+                    "chunk_index": doc.metadata.get("chunk", index),
+                    "owner_user_id": user_id,
+                    "visibility": visibility,
+                    "allowed_user_ids": allowed_user_ids,
+                    "knowledge_dir": knowledge_dir or "",
+                }
+            )
+
+        if documents:
+            self.knowledge_repo.add_documents(documents)
+            logger.info("Git repo ingested: repo={} tag={}", repo_url, knowledge_tag)
+
+    def _split_text(self, raw_text: str) -> list[tuple[str, dict]]:
+        try:
+            md_chunks = self.markdown_splitter.split_text(raw_text)
+            chunks: list[tuple[str, dict]] = []
+            for md_doc in md_chunks:
+                header_metadata = getattr(md_doc, "metadata", {}) or {}
+                content = getattr(md_doc, "page_content", md_doc)
+                for sub_chunk in self.text_splitter.split_text(str(content)):
+                    chunks.append((sub_chunk, dict(header_metadata)))
+            return chunks
+        except Exception as exc:
+            logger.warning("Markdown splitting failed, falling back: {}", exc)
+            return [(chunk, {}) for chunk in self.text_splitter.split_text(raw_text)]
+
+    def _metadata_filter(
+        self, *, tag: str | None = None, knowledge_dir: str | None = None
+    ) -> dict | None:
+        filters = {}
+        if tag:
+            filters["knowledge_tag"] = tag
+        if knowledge_dir:
+            filters["knowledge_dir"] = knowledge_dir
+        return filters or None
+
+    def _rewrite_and_split_query(self, query: str) -> list[str]:
+        cleaned = " ".join(query.strip().split())
+        variants = [cleaned]
+        segments = re.split(r"[?？!！。\n；;]|以及|并且|还有|和|与|,|，", cleaned)
+        variants.extend(segment.strip() for segment in segments if len(segment.strip()) >= 2)
+
+        tokens = re.findall(r"[\w\u4e00-\u9fff]{2,}", cleaned)
+        if 2 <= len(tokens) <= 12:
+            variants.append(" ".join(tokens))
+        elif len(tokens) > 12:
+            variants.append(" ".join(tokens[:12]))
+
+        deduped = []
+        seen = set()
+        for variant in variants:
+            key = variant.lower()
+            if variant and key not in seen:
+                seen.add(key)
+                deduped.append(variant)
+        return deduped[:6]
+
+    def _merge_candidate(
+        self,
+        candidates: dict[str, RetrievedChunk],
+        doc: DocumentEntity,
+        *,
+        channel: str,
+        raw_score: float,
+    ) -> None:
+        metadata = doc.metadata or {}
+        chunk_id = (
+            doc.id
+            or metadata.get("chunk_hash")
+            or hashlib.md5(doc.content.encode("utf-8")).hexdigest()
+        )
+        chunk = candidates.get(chunk_id)
+        if not chunk:
+            chunk = RetrievedChunk(
+                id=chunk_id,
+                content=doc.content,
+                metadata=metadata,
+                source=str(metadata.get("source") or ""),
+                tag=metadata.get("knowledge_tag"),
+                knowledge_dir=metadata.get("knowledge_dir") or None,
+                channels=[],
+                provenance={
+                    "chunk_hash": metadata.get("chunk_hash", chunk_id),
+                    "chunk_index": metadata.get("chunk_index"),
+                    "headers": {
+                        key: value
+                        for key, value in metadata.items()
+                        if key.lower().startswith("header")
+                    },
+                },
+            )
+            candidates[chunk_id] = chunk
+
+        if channel not in chunk.channels:
+            chunk.channels.append(channel)
+        if channel == "vector":
+            chunk.vector_score = (
+                raw_score
+                if chunk.vector_score is None
+                else min(chunk.vector_score, raw_score)
+            )
+        elif channel == "keyword":
+            chunk.keyword_score = (
+                raw_score
+                if chunk.keyword_score is None
+                else max(chunk.keyword_score, raw_score)
+            )
+
+    def _passes_access_filter(
+        self,
+        metadata: dict,
+        *,
+        user_id: str,
+        is_admin: bool,
+        knowledge_dir: str | None,
+    ) -> bool:
+        if knowledge_dir and (metadata.get("knowledge_dir") or "") != knowledge_dir:
+            return False
+        if is_admin:
+            return True
+
+        visibility = metadata.get("visibility") or "public"
+        if visibility == "public":
+            return True
+        owner_user_id = metadata.get("owner_user_id")
+        if owner_user_id and owner_user_id == user_id:
+            return True
+        allowed = metadata.get("allowed_user_ids") or []
+        if isinstance(allowed, str):
+            allowed = [item.strip() for item in allowed.split(",") if item.strip()]
+        return user_id in allowed
+
+    def _normalize_and_score(self, chunks: list[RetrievedChunk]) -> None:
+        vector_values = [
+            1.0 / (1.0 + max(chunk.vector_score or 0.0, 0.0))
+            for chunk in chunks
+            if chunk.vector_score is not None
+        ]
+        keyword_values = [
+            chunk.keyword_score for chunk in chunks if chunk.keyword_score is not None
+        ]
+        vector_norm = self._minmax(vector_values)
+        keyword_norm = self._minmax(keyword_values)
+        vector_index = 0
+        keyword_index = 0
+
+        for chunk in chunks:
+            v = None
+            k = None
+            if chunk.vector_score is not None:
+                v = vector_norm[vector_index]
+                chunk.vector_score = v
+                vector_index += 1
+            if chunk.keyword_score is not None:
+                k = keyword_norm[keyword_index]
+                chunk.keyword_score = k
+                keyword_index += 1
+            if v is not None and k is not None:
+                chunk.score = 0.65 * v + 0.35 * k
+            elif v is not None:
+                chunk.score = v
+            elif k is not None:
+                chunk.score = k
+
+    def _minmax(self, values: Iterable[float | None]) -> list[float]:
+        clean = [float(v) for v in values if v is not None and math.isfinite(float(v))]
+        if not clean:
+            return []
+        low = min(clean)
+        high = max(clean)
+        if high == low:
+            return [1.0 for _ in clean]
+        return [(value - low) / (high - low) for value in clean]
+
+    def _rerank_chunks_with_model(
+        self, query: str, chunks: list[RetrievedChunk]
+    ) -> list[RetrievedChunk]:
+        try:
+            payload = {
+                "query": query,
+                "documents": [chunk.content for chunk in chunks],
+                "return_documents": False,
+            }
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(settings.RERANKER_API_URL, json=payload)
+                response.raise_for_status()
+            results = response.json().get("results", [])
+            if not results:
+                return chunks
+
+            raw_scores = [0.0 for _ in chunks]
+            for position, item in enumerate(results):
+                index = item.get("index", position)
+                if 0 <= index < len(chunks):
+                    raw_scores[index] = float(
+                        item.get("score", item.get("relevance_score", 0.0))
+                    )
+            normalized = self._minmax(raw_scores)
+            for chunk, rerank_score in zip(chunks, normalized):
+                chunk.rerank_score = rerank_score
+                chunk.score = 0.55 * rerank_score + 0.45 * chunk.score
+        except Exception as exc:
+            logger.warning(
+                "Reranker unavailable at {}, using fused retrieval scores: {}",
+                settings.RERANKER_API_URL,
+                exc,
+            )
+        return chunks

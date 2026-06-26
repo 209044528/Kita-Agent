@@ -422,6 +422,42 @@ docker exec -it kita-db-pgvector psql -U postgres -d ai-rag-knowledge \
 
 ## 工程化升级
 
+### 0. 可靠运行时
+
+运行时现已支持：
+
+- Bearer API Key 认证与用户级会话隔离；
+- 同一用户同一会话的 Redis 分布式锁；
+- HTTPS Git 白名单、SSRF 防护及仓库大小限制；
+- 安全 multipart 文件上传，禁止客户端读取服务器文件路径；
+- 模型首包超时、结构化异常、候选模型降级和熔断；
+- 异步工具执行、工具超时与取消；
+- task ID、跨实例取消标记和结构化 SSE 事件。
+
+生产环境建议配置：
+
+```env
+AUTH_ENABLED=true
+AUTH_API_KEYS=replace-with-random-key:admin-user:admin
+MODEL_FALLBACKS=ollama/qwen2.5:3b-instruct
+CORS_ORIGINS=https://your-kita.example.com
+```
+
+API 使用：
+
+```http
+Authorization: Bearer replace-with-random-key
+```
+
+SSE 事件包括 `meta`、`progress`、`tool_start`、`tool_end`、
+`content`、`error`、`cancel` 和 `done`。
+
+取消任务：
+
+```text
+POST /api/v1/chat/tasks/{task_id}/cancel
+```
+
 ### 1. 结构化工具调用
 
 工具调用已升级为 JSON Schema 风格：

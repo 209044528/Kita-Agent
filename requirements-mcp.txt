@@ -1,4 +1,0 @@
--r requirements.txt
-# 1.12.4 supports Streamable HTTP without conflicting with the pinned
-# zhipuai SDK's PyJWT<2.9 requirement.
-mcp==1.12.4

@@ -14,7 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.trigger.http import chat_controller, maintenance_controller, observability_controller
 from app.core.exceptions import KitaBaseException
+from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.core.config import settings
+from app.core.security import resolve_api_key
 from app.core.container import get_tool_registry
 from app.infrastructure.mcp import create_mcp_server
 from app.types.response import Response
@@ -71,12 +73,31 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+@app.middleware("http")
+async def protect_mcp(request: Request, call_next):
+    if settings.AUTH_ENABLED and request.url.path.startswith("/mcp"):
+        authorization = request.headers.get("Authorization", "")
+        if not authorization.startswith("Bearer "):
+            return JSONResponse(status_code=401, content={"detail": "缺少 Bearer API Key"})
+        try:
+            resolve_api_key(authorization.removeprefix("Bearer ").strip())
+        except AuthenticationError as exc:
+            return JSONResponse(status_code=401, content={"detail": exc.info})
+    return await call_next(request)
+
 # --- 2. 全局异常处理 ---
 @app.exception_handler(KitaBaseException)
 async def kita_exception_handler(request: Request, exc: KitaBaseException):
     logger.error(f"业务异常: code={exc.code}, info={exc.info}, data={exc.data}")
+    if isinstance(exc, AuthenticationError):
+        status_code = 401
+    elif isinstance(exc, AuthorizationError):
+        status_code = 403
+    else:
+        status_code = 200
     return JSONResponse(
-        status_code=200,  # 业务异常返回 200，由业务 code 区分
+        status_code=status_code,
         content=Response.error(code=exc.code, info=exc.info, data=exc.data).model_dump()
     )
 
@@ -91,7 +112,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 配置 CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

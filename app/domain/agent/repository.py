@@ -15,25 +15,27 @@ class IAgentRepository(ABC):
     """Agent 会话仓储抽象接口"""
 
     @abstractmethod
-    def get(self, session_id: str) -> Optional["AgentEntity"]:
+    def get(self, session_id: str, user_id: str = "anonymous") -> Optional["AgentEntity"]:
         pass
 
     @abstractmethod
-    def save(self, agent: "AgentEntity") -> None:
+    def save(self, agent: "AgentEntity", user_id: str = "anonymous") -> None:
         pass
 
     @abstractmethod
-    def delete(self, session_id: str) -> None:
+    def delete(self, session_id: str, user_id: str = "anonymous") -> None:
         pass
 
     @abstractmethod
-    def list_sessions(self) -> List[str]:
+    def list_sessions(self, user_id: str = "anonymous") -> List[str]:
         pass
 
     @abstractmethod
-    def save_prompt(self, session_id: str, prompt: str) -> None:
+    def save_prompt(
+        self, session_id: str, prompt: str, user_id: str = "anonymous"
+    ) -> None:
         pass
 
     @abstractmethod
-    def get_prompt(self, session_id: str) -> Optional[str]:
+    def get_prompt(self, session_id: str, user_id: str = "anonymous") -> Optional[str]:
         pass

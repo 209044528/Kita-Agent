@@ -1,12 +1,15 @@
 import os
 import shutil
+import subprocess
 import tempfile
 from typing import List
-from git import Repo
 import pathspec
 from loguru import logger
 from app.domain.knowledge.repository import DocumentEntity
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from app.core.config import settings
+from app.core.input_security import validate_git_url
+from app.core.exceptions import ValidationError
 
 
 class GitRepositoryParser:
@@ -74,6 +77,7 @@ class GitRepositoryParser:
         克隆并解析 Git 仓库
         """
         # 标准化 URL 和分支
+        repo_url = validate_git_url(repo_url)
         repo_url, branch = self._normalize_url(repo_url, branch)
         
         repo_name = repo_url.split("/")[-1].replace(".git", "")
@@ -82,7 +86,30 @@ class GitRepositoryParser:
         documents = []
         try:
             logger.info(f"正在克隆仓库: {repo_url} (branch: {branch}) 到 {local_path}")
-            Repo.clone_from(repo_url, local_path, branch=branch, depth=1)
+            env = {
+                **os.environ,
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_LFS_SKIP_SMUDGE": "1",
+            }
+            subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--single-branch",
+                    "--branch",
+                    branch,
+                    "--",
+                    repo_url,
+                    local_path,
+                ],
+                check=True,
+                timeout=settings.GIT_CLONE_TIMEOUT_SECONDS,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
             
             # 解析 .gitignore
             gitignore_path = os.path.join(local_path, ".gitignore")
@@ -94,15 +121,31 @@ class GitRepositoryParser:
                     spec = pathspec.PathSpec.from_lines("gitwildmatch", gitignore_content.splitlines())
             
             # 遍历文件
+            total_files = 0
+            total_bytes = 0
             for root, dirs, files in os.walk(local_path):
                 # 排除 .git 目录
                 if ".git" in dirs:
                     dirs.remove(".git")
                 
                 for file in files:
+                    total_files += 1
+                    if total_files > settings.GIT_MAX_FILES:
+                        raise ValidationError(
+                            f"仓库文件数超过限制: {settings.GIT_MAX_FILES}"
+                        )
                     full_path = os.path.join(root, file)
                     relative_path = os.path.relpath(full_path, local_path)
                     file_lower = file.lower()
+                    file_size = os.path.getsize(full_path)
+                    if file_size > settings.GIT_MAX_FILE_BYTES:
+                        logger.info(f"跳过超大文件: {relative_path}")
+                        continue
+                    total_bytes += file_size
+                    if total_bytes > settings.GIT_MAX_TOTAL_BYTES:
+                        raise ValidationError(
+                            f"仓库文本总量超过限制: {settings.GIT_MAX_TOTAL_BYTES} 字节"
+                        )
                     
                     # 检查是否匹配 .gitignore
                     if spec and spec.match_file(relative_path):

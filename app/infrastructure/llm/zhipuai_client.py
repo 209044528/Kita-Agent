@@ -4,6 +4,7 @@ from loguru import logger
 from typing import AsyncGenerator
 from app.core.config import settings
 from app.domain.agent.repository import ILLMClient
+from app.core.exceptions import LLMError
 
 class ZhipuAIClient(ILLMClient):
     def __init__(self):
@@ -47,5 +48,10 @@ class ZhipuAIClient(ILLMClient):
 
         except Exception as e:
             logger.error(f"ZhipuAI 流式请求启动失败: {str(e)}")
-            yield f"系统错误: {str(e)}"
+            raise LLMError(
+                f"智谱模型 {target_model} 调用失败: {e}",
+                error_type="provider_error",
+                retryable=True,
+                data={"model": target_model},
+            ) from e
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
+import asyncio
+import inspect
 from typing import Any, Dict, Optional
 
 from jsonschema import Draft202012Validator
@@ -19,8 +21,9 @@ class ToolParameter(BaseModel):
     enum: Optional[list[Any]] = None
 
     def to_json_schema(self) -> dict[str, Any]:
+        schema_type: Any = self.type if self.required else [self.type, "null"]
         schema: dict[str, Any] = {
-            "type": self.type,
+            "type": schema_type,
             "description": self.description,
         }
         if self.enum:
@@ -59,6 +62,9 @@ class BaseTool(ABC):
     @abstractmethod
     def execute(self, **kwargs: Any) -> str:
         raise NotImplementedError
+
+    async def execute_async(self, run_context: Any = None, **kwargs: Any) -> str:
+        return await asyncio.to_thread(self.execute, **kwargs)
 
     @property
     def input_schema(self) -> dict[str, Any]:
@@ -101,9 +107,10 @@ class BaseTool(ABC):
 class ToolRegistry:
     """Single source of truth for Agent, Function Calling, and MCP tools."""
 
-    def __init__(self, observability: Any = None):
+    def __init__(self, observability: Any = None, timeout_seconds: float = 30.0):
         self._tools: Dict[str, BaseTool] = {}
         self._observability = observability
+        self._timeout_seconds = timeout_seconds
 
     def register(self, tool: BaseTool) -> None:
         if tool.name in self._tools:
@@ -144,6 +151,8 @@ class ToolRegistry:
             if not is_valid:
                 result = f"错误: 参数校验失败: {error_msg}"
             else:
+                tool_task = None
+                cancel_task = None
                 try:
                     result = tool.execute(**args)
                     error_prefixes = ("错误:", "工具执行错误:", "知识库检索错误")
@@ -164,6 +173,96 @@ class ToolRegistry:
                 step=step,
             )
         return result
+
+    async def async_execute(
+        self,
+        tool_name: str,
+        args: Dict[str, Any],
+        *,
+        session_id: str | None = None,
+        trace_id: str | None = None,
+        step: int | None = None,
+        run_context: Any = None,
+    ) -> str:
+        started = time.perf_counter()
+        success = False
+        tool = self.get(tool_name)
+        if not tool:
+            result = f"错误: 找不到名为 '{tool_name}' 的工具。"
+        else:
+            is_valid, error_msg = tool.validate_args(args)
+            if not is_valid:
+                result = f"错误: 参数校验失败: {error_msg}"
+            else:
+                try:
+                    if run_context:
+                        await run_context.check_cancelled()
+                    execute_async_signature = inspect.signature(tool.execute_async)
+                    if "run_context" in execute_async_signature.parameters:
+                        tool_coro = tool.execute_async(run_context=run_context, **args)
+                    else:
+                        tool_coro = tool.execute_async(**args)
+                    tool_task = asyncio.create_task(tool_coro)
+                    cancel_task = (
+                        asyncio.create_task(self._wait_for_cancel(run_context))
+                        if run_context
+                        else None
+                    )
+                    wait_set = {tool_task}
+                    if cancel_task:
+                        wait_set.add(cancel_task)
+                    try:
+                        done, _ = await asyncio.wait(
+                            wait_set,
+                            timeout=self._timeout_seconds,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if tool_task in done:
+                            result = tool_task.result()
+                        elif cancel_task and cancel_task in done:
+                            tool_task.cancel()
+                            await cancel_task
+                        else:
+                            tool_task.cancel()
+                            raise TimeoutError
+                    finally:
+                        if cancel_task:
+                            cancel_task.cancel()
+                    error_prefixes = ("错误:", "工具执行错误:", "知识库检索错误")
+                    success = not result.startswith(error_prefixes)
+                except TimeoutError:
+                    result = (
+                        f"工具执行错误: 工具 '{tool_name}' 超过 "
+                        f"{self._timeout_seconds:g} 秒未完成"
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    result = f"工具执行错误: {exc}"
+                finally:
+                    if tool_task and not tool_task.done():
+                        tool_task.cancel()
+                    if cancel_task and not cancel_task.done():
+                        cancel_task.cancel()
+
+        duration_ms = (time.perf_counter() - started) * 1000
+        if self._observability:
+            self._observability.record_tool_call(
+                tool_name=tool_name,
+                arguments=args,
+                result=result,
+                duration_ms=duration_ms,
+                success=success,
+                session_id=session_id,
+                trace_id=trace_id,
+                step=step,
+            )
+        return result
+
+    async def _wait_for_cancel(self, run_context: Any) -> None:
+        while True:
+            await run_context.check_cancelled()
+            await asyncio.sleep(0.1)
 
     def generate_tool_prompt(self) -> str:
         if not self._tools:

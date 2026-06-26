@@ -4,6 +4,8 @@ import { CONFIG } from './config.js';
 
 let sessionId = "";
 let currentSystemPrompt = CONFIG.DEFAULT_SYSTEM_PROMPT;
+let activeTaskId = null;
+let isStreaming = false;
 
 // State management
 export const state = {
@@ -124,6 +126,12 @@ export const ui = {
     },
 
     async sendMessage() {
+        if (isStreaming) {
+            if (activeTaskId) {
+                await api.cancelTask(activeTaskId);
+            }
+            return;
+        }
         const inputEle = document.getElementById('userInput');
         const text = inputEle.value.trim();
         if (!text) return;
@@ -134,12 +142,68 @@ export const ui = {
         inputEle.value = '';
 
         const loadingTip = document.getElementById('loadingTip');
-        loadingTip.style.display = 'block';
+        const showThinking = (step = 1) => {
+            loadingTip.innerText = step && step > 1
+                ? `正在进行第 ${step} 步推理...`
+                : '💡 正在思考...';
+            loadingTip.style.display = 'block';
+        };
+        const hideThinking = () => {
+            loadingTip.style.display = 'none';
+        };
+        showThinking();
 
         // 创建一个空的 Agent 消息框用于流式填充
         const agentMsgDiv = this.appendMessage('agent', '');
         agentMsgDiv.classList.add('streaming-cursor');
         let fullReply = "";
+        let displayedReply = "";
+        let pendingReply = "";
+        let typewriterTimer = null;
+        let typewriterResolve = null;
+        let typewriterIdle = Promise.resolve();
+        const stopTypewriter = () => {
+            if (typewriterTimer) {
+                clearInterval(typewriterTimer);
+                typewriterTimer = null;
+            }
+            if (typewriterResolve) {
+                typewriterResolve();
+                typewriterResolve = null;
+            }
+        };
+        const ensureTypewriter = () => {
+            if (typewriterTimer) return;
+            typewriterIdle = new Promise(resolve => {
+                typewriterResolve = resolve;
+                typewriterTimer = setInterval(() => {
+                    if (!pendingReply) {
+                        stopTypewriter();
+                        return;
+                    }
+                    const step = pendingReply.length > 120 ? 6 : pendingReply.length > 40 ? 3 : 1;
+                    displayedReply += pendingReply.slice(0, step);
+                    pendingReply = pendingReply.slice(step);
+                    this.updateMessage(agentMsgDiv, displayedReply);
+                }, 18);
+            });
+        };
+        const enqueueReply = (content) => {
+            if (!content) return;
+            hideThinking();
+            fullReply += content;
+            pendingReply += content;
+            ensureTypewriter();
+        };
+        const flushTypewriter = async () => {
+            while (typewriterTimer) {
+                await typewriterIdle;
+            }
+        };
+        isStreaming = true;
+        activeTaskId = null;
+        const sendButton = document.getElementById('btnSend');
+        sendButton.textContent = '停止';
 
         try {
             console.log("开始流式请求...");
@@ -153,47 +217,60 @@ export const ui = {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
-            
-            loadingTip.style.display = 'none';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
                 buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                
-                // 留下最后一个可能不完整的行在 buffer 中
-                buffer = lines.pop();
-                
-                for (const line of lines) {
-                    const trimmedLine = line.trim();
-                    if (trimmedLine.startsWith('data: ')) {
-                        const dataStr = trimmedLine.slice(6).trim();
-                        if (dataStr === '[DONE]') {
-                            console.log("流式请求完成");
-                            break;
+                const blocks = buffer.split('\n\n');
+                buffer = blocks.pop();
+
+                for (const block of blocks) {
+                    let eventName = 'message';
+                    let dataStr = '';
+                    for (const line of block.split('\n')) {
+                        if (line.startsWith('event:')) eventName = line.slice(6).trim();
+                        if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+                    }
+                    if (!dataStr || dataStr === '[DONE]' || eventName === 'done') continue;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        if (eventName === 'meta') {
+                            activeTaskId = data.task_id;
+                        } else if (eventName === 'progress') {
+                            showThinking(data.step);
+                        } else if (eventName === 'error') {
+                            hideThinking();
+                            throw new Error(data.message || '生成失败');
+                        } else if (eventName === 'cancel') {
+                            enqueueReply('\n\n（已停止生成）');
+                        } else if (eventName === 'tool_end') {
+                            enqueueReply('\n✓ 已完成工具调用\n');
+                        } else if (eventName === 'tool_start') {
+                            // Keep tool progress out of the final assistant message body.
+                        } else if (data.content) {
+                            enqueueReply(data.content);
                         }
-                        
-                        try {
-                            const data = JSON.parse(dataStr);
-                            if (data.content) {
-                                fullReply += data.content;
-                                this.updateMessage(agentMsgDiv, fullReply);
-                            }
-                        } catch (e) {
-                            console.error("解析 SSE JSON 失败:", e, "原始数据:", dataStr);
-                        }
+                    } catch (e) {
+                        if (eventName === 'error') throw e;
+                        console.error("解析 SSE JSON 失败:", e, "原始数据:", dataStr);
                     }
                 }
             }
+            await flushTypewriter();
             
             this.loadHistorySessions();
         } catch (error) {
+            pendingReply = "";
+            stopTypewriter();
             console.error("流式对话出错:", error);
             agentMsgDiv.innerText = `系统错误: ${error.message}`;
             Toast.error(`对话失败: ${error.message}`);
         } finally {
+            isStreaming = false;
+            activeTaskId = null;
+            sendButton.textContent = '发送';
             loadingTip.style.display = 'none';
             agentMsgDiv.classList.remove('streaming-cursor');
         }
@@ -249,11 +326,11 @@ export const ui = {
             let html = '';
             if (sessions.length > 0) {
                 html += `<div class="stat-card"><h4>活跃会话数</h4><div class="stat-value">${sessions.length}</div></div>`;
-                html += '<table class="data-table"><thead><tr><th>Session ID</th><th>消息数</th><th>TTL</th></tr></thead><tbody>';
+                html += '<table class="data-table"><thead><tr><th>用户</th><th>Session ID</th><th>消息数</th><th>TTL</th></tr></thead><tbody>';
                 sessions.forEach(session => {
                     const hours = Math.floor(session.ttl / 3600);
                     const minutes = Math.floor((session.ttl % 3600) / 60);
-                    html += `<tr><td>${session.session_id}</td><td>${session.message_count}</td><td>${hours}h ${minutes}m</td></tr>`;
+                    html += `<tr><td>${session.user_id || 'anonymous'}</td><td>${session.session_id}</td><td>${session.message_count}</td><td>${hours}h ${minutes}m</td></tr>`;
                 });
                 html += '</tbody></table>';
             } else { html = '<div class="empty-state">暂无活跃会话</div>'; }

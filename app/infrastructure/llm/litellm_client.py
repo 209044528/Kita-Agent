@@ -1,10 +1,12 @@
 import os
+import asyncio
 import litellm
 from loguru import logger
 from typing import AsyncGenerator
 from app.core.config import settings
 from app.domain.agent.repository import ILLMClient
 from app.infrastructure.llm.zhipuai_client import ZhipuAIClient
+from app.core.exceptions import LLMError
 
 # 禁用 LiteLLM 遥测和远程价格表拉取（必须在所有业务 import 之前设置）
 litellm.telemetry = False
@@ -43,12 +45,35 @@ class LiteLLMClient(ILLMClient):
                 model=target_model,
                 messages=messages,
                 stream=True,
+                timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
                 **kwargs
             )
             async for chunk in response:
                 content = chunk.choices[0].delta.content
                 if content:
                     yield content
+        except asyncio.TimeoutError as e:
+            raise LLMError(
+                f"模型 {target_model} 请求超时",
+                error_type="timeout",
+                retryable=True,
+                data={"model": target_model},
+            ) from e
         except Exception as e:
             logger.error(f"LiteLLM 流式请求失败: {str(e)}")
-            yield f"系统错误: {str(e)}"
+            message = str(e)
+            lower = message.lower()
+            if "401" in lower or "authentication" in lower or "api key" in lower:
+                error_type, retryable = "authentication", False
+            elif "429" in lower or "rate limit" in lower:
+                error_type, retryable = "rate_limit", True
+            elif "timeout" in lower:
+                error_type, retryable = "timeout", True
+            else:
+                error_type, retryable = "provider_error", True
+            raise LLMError(
+                f"模型 {target_model} 调用失败: {message}",
+                error_type=error_type,
+                retryable=retryable,
+                data={"model": target_model},
+            ) from e

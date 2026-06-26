@@ -35,12 +35,14 @@ class DocumentParserService:
         file_extension = path.suffix.lower()
 
         try:
-            if file_extension == ".txt":
+            if file_extension in {".txt", ".md", ".json", ".yaml", ".yml"}:
                 return DocumentParserService._parse_txt(file_path)
             elif file_extension == ".pdf":
                 return DocumentParserService._parse_pdf(file_path)
-            elif file_extension in [".docx", ".doc"]:
+            elif file_extension == ".docx":
                 return DocumentParserService._parse_word(file_path)
+            elif file_extension == ".doc":
+                return DocumentParserService._parse_with_unstructured(file_path)
             else:
                 return DocumentParserService._parse_with_unstructured(file_path)
         except Exception as e:
