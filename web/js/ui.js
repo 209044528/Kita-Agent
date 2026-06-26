@@ -1,6 +1,6 @@
-import { api } from './api.js?v=20260626-platform-human';
-import { Toast, cleanMessageContent, generateSessionId, escapeHtml } from './utils.js?v=20260626-platform-human';
-import { CONFIG } from './config.js?v=20260626-platform-human';
+import { api } from './api.js?v=20260626-home-v2';
+import { Toast, cleanMessageContent, generateSessionId, escapeHtml } from './utils.js?v=20260626-home-v2';
+import { CONFIG } from './config.js?v=20260626-home-v2';
 
 let sessionId = "";
 let currentSystemPrompt = CONFIG.DEFAULT_SYSTEM_PROMPT;
@@ -141,7 +141,43 @@ export const ui = {
     startNewChat() {
         state.setSessionId(generateSessionId());
         history.pushState({}, "", "/");
-        document.getElementById('chatBox').innerHTML = '<div class="message msg-agent">你好！我是 Kita，是一个具备逻辑思考能力的智能 AI 助手。有什么我可以帮你的吗？</div>';
+        document.getElementById('chatBox').innerHTML = `
+            <div class="welcome-landing" id="welcomeLanding">
+                <div class="welcome-hero">
+                    <div class="welcome-logo">K</div>
+                    <h1 class="welcome-title">你好，我是 Kita</h1>
+                    <p class="welcome-subtitle">具备逻辑推理与知识检索能力的智能 AI 助手。选择下方操作快速开始，或直接输入你的问题。</p>
+                </div>
+                <div class="welcome-grid">
+                    <div class="welcome-card" data-welcome-action="new-chat">
+                        <div class="welcome-card-icon">💬</div>
+                        <div class="welcome-card-title">开始新对话</div>
+                        <div class="welcome-card-desc">直接在下方输入框提问，Kita 会为你推理与解答</div>
+                    </div>
+                    <div class="welcome-card" data-welcome-action="upload">
+                        <div class="welcome-card-icon">📂</div>
+                        <div class="welcome-card-title">上传知识库</div>
+                        <div class="welcome-card-desc">导入文本内容，让 Kita 基于你的数据回答问题</div>
+                    </div>
+                    <div class="welcome-card" data-welcome-action="git">
+                        <div class="welcome-card-icon">🐈</div>
+                        <div class="welcome-card-title">Git 导入</div>
+                        <div class="welcome-card-desc">从 GitHub 仓库自动解析代码与文档作为知识源</div>
+                    </div>
+                    <div class="welcome-card" data-welcome-action="prompt">
+                        <div class="welcome-card-icon">🌟</div>
+                        <div class="welcome-card-title">修改提示词</div>
+                        <div class="welcome-card-desc">自定义 AI 的角色身份与回答风格</div>
+                    </div>
+                </div>
+                <div class="welcome-tags">
+                    <span class="welcome-tag">🧠 逻辑推理</span>
+                    <span class="welcome-tag">📚 知识检索</span>
+                    <span class="welcome-tag">🔧 工具调用</span>
+                    <span class="welcome-tag">🧭 意图路由</span>
+                    <span class="welcome-tag">📊 Trace 追踪</span>
+                </div>
+            </div>`;
         this.loadHistorySessions();
     },
 
