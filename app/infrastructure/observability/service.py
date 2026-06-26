@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from app.infrastructure.platform_store import PlatformStore
 
 
 class ObservabilityService:
@@ -18,11 +19,13 @@ class ObservabilityService:
         self,
         trace_path: str = "logs/agent_traces.jsonl",
         bad_case_path: str = "logs/bad_cases.jsonl",
+        platform_store: PlatformStore | None = None,
         enabled: bool = True,
     ):
         self.enabled = enabled
         self.trace_path = Path(trace_path)
         self.bad_case_path = Path(bad_case_path)
+        self.platform_store = platform_store
         self._lock = threading.Lock()
         self._tool_calls = defaultdict(int)
         self._tool_errors = defaultdict(int)
@@ -129,6 +132,8 @@ class ObservabilityService:
             "payload": payload or {},
         }
         self._append_jsonl(self.trace_path, event)
+        if self.platform_store:
+            self.platform_store.insert_trace_event(event)
 
     def record_bad_case(
         self,
@@ -152,6 +157,8 @@ class ObservabilityService:
             "model_output": model_output,
         }
         self._append_jsonl(self.bad_case_path, case)
+        if self.platform_store:
+            self.platform_store.insert_bad_case(case)
 
     def metrics(self) -> dict[str, Any]:
         with self._lock:
@@ -187,6 +194,45 @@ class ObservabilityService:
         if session_id:
             events = [event for event in events if event.get("session_id") == session_id]
         return events[-limit:]
+
+    def read_trace_events(
+        self, session_id: str | None = None, trace_id: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        if self.platform_store:
+            return self.platform_store.read_trace_events(
+                session_id=session_id, trace_id=trace_id, limit=limit
+            )
+        if trace_id:
+            return [
+                event
+                for event in self.read_traces(session_id=session_id, limit=limit * 3)
+                if event.get("trace_id") == trace_id
+            ][-limit:]
+        return self.read_traces(session_id=session_id, limit=limit)
+
+    def read_bad_cases(self, limit: int = 100) -> list[dict[str, Any]]:
+        if self.platform_store:
+            return self.platform_store.read_bad_cases(limit=limit)
+        if not self.bad_case_path.exists():
+            return []
+        lines = self.bad_case_path.read_text(encoding="utf-8").splitlines()
+        return [json.loads(line) for line in lines[-limit:] if line]
+
+    def trace_summary(self) -> dict[str, Any]:
+        if self.platform_store:
+            return self.platform_store.trace_summary()
+        events = self.read_traces(limit=10000)
+        by_type: dict[str, int] = defaultdict(int)
+        for event in events:
+            by_type[event.get("event_type", "unknown")] += 1
+        return {
+            "trace_events": len(events),
+            "bad_cases": len(self.read_bad_cases(limit=10000)),
+            "events_by_type": [
+                {"event_type": key, "count": value}
+                for key, value in sorted(by_type.items(), key=lambda item: item[1], reverse=True)
+            ],
+        }
 
     def _append_jsonl(self, path: Path, value: dict[str, Any]) -> None:
         try:

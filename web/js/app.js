@@ -1,6 +1,6 @@
-import { ui, state } from './ui.js?v=20260626-typewriter';
-import { api } from './api.js?v=20260626-typewriter';
-import { Toast, generateSessionId } from './utils.js?v=20260626-typewriter';
+import { ui, state } from './ui.js?v=20260626-platform-human';
+import { api } from './api.js?v=20260626-platform-human';
+import { Toast, generateSessionId } from './utils.js?v=20260626-platform-human';
 
 // Setup marked.js configurations
 if (window.marked && window.markedKatex) {
@@ -145,6 +145,10 @@ function initEvents() {
                 } catch(e) {}
             }
         }
+        else if (action === 'fill-node-job') {
+            document.getElementById('nodeLogJobId').value = id;
+            await ui.loadNodeLogsFromConsole();
+        }
     });
 
     // Global Click Listener for Dropdowns
@@ -226,6 +230,21 @@ function initEvents() {
 
     document.getElementById('btnRefreshMaintenance').addEventListener('click', () => {
         ui.refreshMaintenanceData();
+    });
+    document.getElementById('btnSaveIntent').addEventListener('click', () => {
+        ui.saveIntentFromConsole();
+    });
+    document.getElementById('btnClassifyIntent').addEventListener('click', () => {
+        ui.classifyIntentFromConsole();
+    });
+    document.getElementById('btnLoadNodeLogs').addEventListener('click', () => {
+        ui.loadNodeLogsFromConsole();
+    });
+    document.getElementById('btnSaveFeedback').addEventListener('click', () => {
+        ui.saveFeedbackFromConsole();
+    });
+    document.getElementById('btnSaveModel').addEventListener('click', () => {
+        ui.saveModelFromConsole();
     });
 
     // History API integration

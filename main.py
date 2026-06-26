@@ -12,7 +12,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.trigger.http import chat_controller, maintenance_controller, observability_controller
+from app.trigger.http import (
+    chat_controller,
+    maintenance_controller,
+    observability_controller,
+    platform_controller,
+)
 from app.core.exceptions import KitaBaseException
 from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.core.config import settings
@@ -130,6 +135,7 @@ async def chat_page(session_id: str):
 app.include_router(chat_controller.router, prefix="/api/v1", tags=["Agent Chat"])
 app.include_router(maintenance_controller.router, prefix="/api/v1", tags=["Maintenance"])
 app.include_router(observability_controller.router, prefix="/api/v1", tags=["Observability"])
+app.include_router(platform_controller.router, prefix="/api/v1", tags=["Platform"])
 if mcp_app:
     @app.api_route(
         "/mcp",

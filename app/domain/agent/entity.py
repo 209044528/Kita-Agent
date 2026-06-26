@@ -19,6 +19,7 @@ class AgentEntity(BaseModel):
     owner_user_id: str = "anonymous"
     title: str = ""
     system_prompt: str = ""
+    conversation_summary: str = ""
     messages: List[Dict[str, str]] = Field(default_factory=list)
 
     def __init__(self, **data: Any):

@@ -17,6 +17,15 @@ export function generateSessionId() {
     return "session-" + Math.random().toString(36).substring(2, 9);
 }
 
+export function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
 // Toast notification system
 export const Toast = {
     show(message, type = 'info', duration = 3000) {

@@ -18,6 +18,8 @@ from app.core.container import (
     get_knowledge_service,
     get_agent_repo,
     get_task_manager,
+    get_ingestion_pipeline,
+    get_platform_store,
 )
 from app.core.config import settings
 from app.core.exceptions import (
@@ -28,6 +30,8 @@ from app.core.exceptions import (
 from app.core.input_security import validate_upload_content, validate_upload_name
 from app.core.security import RequestIdentity, get_identity, require_admin
 from app.core.task_manager import AgentTaskManager
+from app.application.services.ingestion_service import IngestionPipeline, IngestionRequest
+from app.infrastructure.platform_store import PlatformStore
 from pydantic import BaseModel, Field
 from typing import Dict, List
 from loguru import logger
@@ -94,24 +98,32 @@ def _process_uploaded_knowledge_background(
             os.unlink(path)
 
 
-@router.post("/knowledge/upsert", response_model=Response[bool])
+@router.post("/knowledge/upsert", response_model=Response[Dict])
 def upsert_knowledge(
     request: KnowledgeUpsertRequestDTO, 
     background_tasks: BackgroundTasks,
-    knowledge_service: KnowledgeAppService = Depends(get_knowledge_service),
+    ingestion: IngestionPipeline = Depends(get_ingestion_pipeline),
     identity: RequestIdentity = Depends(require_admin),
 ):
     """添加或更新知识"""
     # 验证输入
     request.validate_input()
 
-    # 将入库任务提交到后台执行
-    background_tasks.add_task(_process_knowledge_background, request, knowledge_service, identity)
+    ingest_request = IngestionRequest(
+        kind="text",
+        raw_text=request.raw_text,
+        tag=request.tag,
+        source_name=request.source_name,
+        knowledge_dir=request.knowledge_dir,
+        visibility=request.visibility,
+        allowed_user_ids=request.allowed_user_ids,
+    )
+    job_id = ingestion.submit(ingest_request, identity)
+    background_tasks.add_task(ingestion.run, job_id, ingest_request, identity)
+    return Response.success(data={"job_id": job_id}, info="入库任务已提交后台处理")
 
-    return Response.success(data=True, info="入库任务已提交后台处理")
 
-
-@router.post("/knowledge/upload", response_model=Response[bool])
+@router.post("/knowledge/upload", response_model=Response[Dict])
 async def upload_knowledge(
     background_tasks: BackgroundTasks,
     tag: str,
@@ -119,7 +131,7 @@ async def upload_knowledge(
     visibility: str = "public",
     knowledge_dir: str | None = None,
     file: UploadFile = File(...),
-    knowledge_service: KnowledgeAppService = Depends(get_knowledge_service),
+    ingestion: IngestionPipeline = Depends(get_ingestion_pipeline),
     identity: RequestIdentity = Depends(require_admin),
 ):
     filename = validate_upload_name(file.filename)
@@ -132,18 +144,44 @@ async def upload_knowledge(
             f"文件超过 {settings.MAX_UPLOAD_BYTES} 字节限制"
         )
     validate_upload_content(filename, content)
-    background_tasks.add_task(
-        _process_uploaded_knowledge_background,
-        content,
-        filename,
-        tag,
-        source_name,
-        knowledge_service,
-        identity,
-        visibility,
-        knowledge_dir,
+    ingest_request = IngestionRequest(
+        kind="file",
+        file_bytes=content,
+        filename=filename,
+        tag=tag,
+        source_name=source_name or filename,
+        visibility=visibility,
+        knowledge_dir=knowledge_dir,
     )
-    return Response.success(data=True, info="文件入库任务已提交")
+    job_id = ingestion.submit(ingest_request, identity)
+    background_tasks.add_task(ingestion.run, job_id, ingest_request, identity)
+    return Response.success(data={"job_id": job_id}, info="文件入库任务已提交")
+
+
+@router.get("/ingestion/jobs", response_model=Response[List[Dict]])
+def list_ingestion_jobs(
+    limit: int = 100,
+    store: PlatformStore = Depends(get_platform_store),
+    identity: RequestIdentity = Depends(get_identity),
+):
+    user_id = None if identity.is_admin else identity.user_id
+    return Response.success(data=store.list_ingest_jobs(user_id=user_id, limit=limit))
+
+
+@router.get("/ingestion/jobs/{job_id}", response_model=Response[Dict])
+def get_ingestion_job(
+    job_id: str,
+    store: PlatformStore = Depends(get_platform_store),
+    identity: RequestIdentity = Depends(get_identity),
+):
+    job = store.get_ingest_job(job_id)
+    if not job:
+        raise ResourceNotFoundError(info="摄取任务不存在")
+    if job.get("user_id") != identity.user_id and not identity.is_admin:
+        from app.core.exceptions import AuthorizationError
+
+        raise AuthorizationError(info="无权查看该摄取任务")
+    return Response.success(data=job)
 
 
 @router.post("/knowledge/search", response_model=Response[List[Dict]])

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import math
 import re
-from typing import Iterable, List
+from typing import Iterable
 
 import httpx
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
@@ -16,6 +15,7 @@ from app.domain.knowledge.repository import (
     RetrievedChunk,
 )
 from app.infrastructure.parser.git_parser import GitRepositoryParser
+from app.infrastructure.platform_store import stable_id
 
 
 class KnowledgeAppService:
@@ -51,19 +51,49 @@ class KnowledgeAppService:
         visibility: str = "public",
         allowed_user_ids: list[str] | None = None,
         knowledge_dir: str | None = None,
-    ) -> None:
-        """Split text into chunks and persist them with ownership/provenance metadata."""
+    ) -> list[DocumentEntity]:
+        """Split text into chunks and persist them with provenance metadata."""
+        documents = self.build_documents_from_text(
+            raw_text=raw_text,
+            tag=tag,
+            source_name=source_name,
+            user_id=user_id,
+            visibility=visibility,
+            allowed_user_ids=allowed_user_ids,
+            knowledge_dir=knowledge_dir,
+        )
+        self.store_documents(documents)
+        return documents
+
+    def build_documents_from_text(
+        self,
+        raw_text: str,
+        tag: str,
+        source_name: str,
+        *,
+        user_id: str = "anonymous",
+        visibility: str = "public",
+        allowed_user_ids: list[str] | None = None,
+        knowledge_dir: str | None = None,
+    ) -> list[DocumentEntity]:
+        """Build chunk documents without writing them.
+
+        This is used by the node-based ingestion pipeline so parsing, chunking,
+        enrichment, and indexing can be observed independently.
+        """
         chunks = self._split_text(raw_text)
-        documents = []
+        documents: list[DocumentEntity] = []
         allowed_user_ids = allowed_user_ids or []
+        document_id = stable_id(tag, knowledge_dir or "", source_name, user_id, prefix="doc_")
 
         for index, (chunk_content, header_meta) in enumerate(chunks):
-            chunk_hash = hashlib.md5(
-                f"{tag}:{source_name}:{index}:{chunk_content}".encode("utf-8")
-            ).hexdigest()
+            chunk_hash = stable_id(tag, source_name, index, chunk_content, prefix="chunk_")
             metadata = {
                 "knowledge_tag": tag,
                 "source": source_name,
+                "source_name": source_name,
+                "source_type": "text",
+                "document_id": document_id,
                 "chunk_hash": chunk_hash,
                 "chunk_index": index,
                 "owner_user_id": user_id,
@@ -76,6 +106,9 @@ class KnowledgeAppService:
                 DocumentEntity(content=chunk_content, metadata=metadata, id=chunk_hash)
             )
 
+        return documents
+
+    def store_documents(self, documents: list[DocumentEntity]) -> None:
         if documents:
             self.knowledge_repo.add_documents(documents)
 
@@ -213,7 +246,32 @@ class KnowledgeAppService:
         visibility: str = "public",
         allowed_user_ids: list[str] | None = None,
         knowledge_dir: str | None = None,
-    ) -> None:
+    ) -> list[DocumentEntity]:
+        documents = self.build_documents_from_git(
+            repo_url=repo_url,
+            branch=branch,
+            knowledge_tag=knowledge_tag,
+            user_id=user_id,
+            visibility=visibility,
+            allowed_user_ids=allowed_user_ids,
+            knowledge_dir=knowledge_dir,
+        )
+        self.store_documents(documents)
+        if documents:
+            logger.info("Git repo ingested: repo={} tag={}", repo_url, knowledge_tag)
+        return documents
+
+    def build_documents_from_git(
+        self,
+        repo_url: str,
+        branch: str = "main",
+        knowledge_tag: str | None = None,
+        *,
+        user_id: str = "anonymous",
+        visibility: str = "public",
+        allowed_user_ids: list[str] | None = None,
+        knowledge_dir: str | None = None,
+    ) -> list[DocumentEntity]:
         if not knowledge_tag:
             clean_url = repo_url.rstrip("/").replace(".git", "")
             if "github.com" in clean_url and ("/tree/" in clean_url or "/blob/" in clean_url):
@@ -223,26 +281,32 @@ class KnowledgeAppService:
         documents = self.git_parser.parse_repo(repo_url, branch)
         allowed_user_ids = allowed_user_ids or []
         for index, doc in enumerate(documents):
-            chunk_hash = doc.id or hashlib.md5(
-                f"{knowledge_tag}:{repo_url}:{index}:{doc.content}".encode("utf-8")
-            ).hexdigest()
+            source_name = str(doc.metadata.get("source") or repo_url)
+            document_id = stable_id(
+                knowledge_tag, knowledge_dir or "", source_name, branch, prefix="doc_"
+            )
+            chunk_hash = doc.id or stable_id(
+                knowledge_tag, repo_url, branch, index, doc.content, prefix="chunk_"
+            )
             doc.id = chunk_hash
             doc.metadata.update(
                 {
                     "knowledge_tag": knowledge_tag,
-                    "source": doc.metadata.get("source") or repo_url,
+                    "source": source_name,
+                    "source_name": source_name,
+                    "source_type": "git",
+                    "document_id": document_id,
                     "chunk_hash": chunk_hash,
                     "chunk_index": doc.metadata.get("chunk", index),
                     "owner_user_id": user_id,
                     "visibility": visibility,
                     "allowed_user_ids": allowed_user_ids,
                     "knowledge_dir": knowledge_dir or "",
+                    "branch": branch,
+                    "repo_url": repo_url,
                 }
             )
-
-        if documents:
-            self.knowledge_repo.add_documents(documents)
-            logger.info("Git repo ingested: repo={} tag={}", repo_url, knowledge_tag)
+        return documents
 
     def _split_text(self, raw_text: str) -> list[tuple[str, dict]]:
         try:
@@ -271,7 +335,7 @@ class KnowledgeAppService:
     def _rewrite_and_split_query(self, query: str) -> list[str]:
         cleaned = " ".join(query.strip().split())
         variants = [cleaned]
-        segments = re.split(r"[?？!！。\n；;]|以及|并且|还有|和|与|,|，", cleaned)
+        segments = re.split(r"[?？!！。\n；;,，]|以及|并且|还有|和|与", cleaned)
         variants.extend(segment.strip() for segment in segments if len(segment.strip()) >= 2)
 
         tokens = re.findall(r"[\w\u4e00-\u9fff]{2,}", cleaned)
@@ -301,7 +365,7 @@ class KnowledgeAppService:
         chunk_id = (
             doc.id
             or metadata.get("chunk_hash")
-            or hashlib.md5(doc.content.encode("utf-8")).hexdigest()
+            or stable_id(doc.content, prefix="chunk_")
         )
         chunk = candidates.get(chunk_id)
         if not chunk:
@@ -316,6 +380,7 @@ class KnowledgeAppService:
                 provenance={
                     "chunk_hash": metadata.get("chunk_hash", chunk_id),
                     "chunk_index": metadata.get("chunk_index"),
+                    "document_id": metadata.get("document_id"),
                     "headers": {
                         key: value
                         for key, value in metadata.items()

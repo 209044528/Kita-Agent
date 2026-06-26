@@ -20,7 +20,7 @@ Kita-Agent 是一个基于 **ReAct 推理循环 + RAG 知识库 + FastAPI SSE �
 - [快速启动](#快速启动)
 - [环境变量](#环境变量)
 - [日志与维护](#日志与维护)
-- [已完成的工程化升级](#已完成的工程化升级)
+- [工程化升级](#工程化升级)
 
 ---
 
@@ -67,6 +67,7 @@ Kita-Agent 是一个基于 **ReAct 推理循环 + RAG 知识库 + FastAPI SSE �
 
 ```text
 knowledge_search(query="检索关键词", tag="知识标签")
+mcp_call(server_name="local", tool_name="...", arguments={...})
 ```
 
 后续可以在此基础上扩展：
@@ -96,7 +97,33 @@ robot_action(action="scan")
 
 ---
 
-### 4. FastAPI + SSE 流式输出
+### 4. 平台化运行与治理能力
+
+项目内置轻量平台层，默认使用 `data/kita_platform.db` 保存运行治理数据，向量内容仍由 pgvector 承载。
+
+- Intent Tree：支持 KB / MCP / SYSTEM 三类意图节点、关键词路由、Query Term Mapping；
+- 节点化摄取 Pipeline：内置 validate / parse / chunk / enrich / index DAG，并持久化 node logs；
+- 知识目录：将 KB、Document、Chunk 作为一等元数据记录，支持可见性和用户过滤；
+- Trace 闭环：保存 trace events、bad cases、人工 feedback，并支持 eval dataset 回归评测；
+- 模型路由：支持后台配置模型优先级，记录模型健康、失败和降级状态；
+- Web 控制台：在“系统与控制台”弹窗中可查看/维护意图、知识目录、摄取日志、Trace feedback 和模型路由。
+
+常用 API：
+
+```text
+POST /api/v1/platform/intents
+POST /api/v1/platform/intents/classify
+GET  /api/v1/platform/knowledge/bases
+GET  /api/v1/platform/ingestion/jobs/{job_id}/nodes
+POST /api/v1/platform/traces/feedback
+POST /api/v1/platform/evaluation/datasets/{dataset_id}/run
+POST /api/v1/platform/llm/models
+GET  /api/v1/platform/llm/health
+```
+
+---
+
+### 5. FastAPI + SSE 流式输出
 
 项目通过 FastAPI 提供 Agent HTTP 接口，并使用 SSE 返回流式内容：
 
@@ -111,7 +138,7 @@ data: [DONE]
 
 ---
 
-### 5. Clean Architecture / DDD 分层
+### 6. Clean Architecture / DDD 分层
 
 项目采用偏 Clean Architecture 的目录组织：
 
@@ -125,7 +152,7 @@ data: [DONE]
 
 ---
 
-### 6. 本地化与容器化部署
+### 7. 本地化与容器化部署
 
 项目支持通过 Docker Compose 管理：
 
@@ -457,76 +484,3 @@ SSE 事件包括 `meta`、`progress`、`tool_start`、`tool_end`、
 ```text
 POST /api/v1/chat/tasks/{task_id}/cancel
 ```
-
-### 1. 结构化工具调用
-
-工具调用已升级为 JSON Schema 风格：
-
-```json
-{
-  "tool": "knowledge_search",
-  "arguments": {
-    "query": "ReAct Agent",
-    "tag": "agent-basic"
-  }
-}
-```
-
-`ToolRegistry.definitions()` 可输出通用定义，`openai_tools()` 可输出
-Function Calling 定义。旧版正则格式仍作为兼容回退。
-
----
-
-### 2. MCP Server 接入
-
-现有 `ToolRegistry` 已通过官方 MCP Python SDK 暴露，新增工具后会自动进入 MCP Tool 列表。
-
-```bash
-pip install -r requirements-mcp.txt
-
-# stdio
-python mcp_server.py
-
-# 独立 Streamable HTTP，默认地址 http://127.0.0.1:8000/
-python mcp_server.py --transport streamable-http
-```
-
-在 `.env` 中设置 `MCP_ENABLED=true`，还可将 Streamable HTTP 挂载到主服务
-`http://localhost:8000/mcp`。
-
----
-
-### 3. 评测与可观测性
-
-当前已提供：
-
-- Agent 轨迹 JSONL 持久化：`logs/agent_traces.jsonl`；
-- 工具调用次数、错误数和平均耗时统计；
-- 知识检索在线命中率与离线关键字评测；
-- 解析失败、最大步数等 bad case 收集；
-- `unittest` 单元测试；
-- 指标、轨迹和 RAG 评测 HTTP 接口。
-
-```text
-GET  /api/v1/observability/metrics
-GET  /api/v1/observability/traces?session_id=...
-POST /api/v1/evaluation/rag
-```
-
-下一阶段可接入 OTLP Exporter、LangSmith Dataset 和基于语义相关性的评测器。
-
----
-
-## 项目定位总结
-
-Kita-Agent 是一个用于学习和验证 Agent 工程核心机制的项目。  
-它重点展示了：
-
-- 如何手写 ReAct 推理循环；
-- 如何设计可扩展工具注册机制；
-- 如何将 RAG 检索结果注入 Agent 观察；
-- 如何通过 FastAPI 暴露流式 Agent 服务；
-- 如何通过 Clean Architecture 降低领域逻辑和基础设施的耦合；
-- 如何在工具失败或格式异常时进行纠偏和再规划。
-
-后续可以在此基础上继续扩展为 MCP 工具服务、代码理解 Agent 或具身智能 Agent 原型。

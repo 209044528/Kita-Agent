@@ -7,9 +7,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from app.application.services.knowledge_app_service import KnowledgeAppService
+from app.application.services.ingestion_service import IngestionPipeline, IngestionRequest
 from app.core.config import settings
-from app.core.container import get_knowledge_service
+from app.core.container import get_ingestion_pipeline
 from app.core.exceptions import KnowledgeError
 from app.core.input_security import validate_git_url
 from app.core.security import RequestIdentity, require_admin
@@ -27,35 +27,26 @@ class GitIngestRequest(BaseModel):
     allowed_user_ids: list[str] = Field(default_factory=list)
 
 
-def _background_git_ingest(
-    request: GitIngestRequest,
-    knowledge_service: KnowledgeAppService,
-    identity: RequestIdentity,
-):
-    try:
-        knowledge_service.ingest_git_repo(
-            repo_url=request.repo_url,
-            branch=request.branch,
-            knowledge_tag=request.knowledge_tag,
-            user_id=identity.user_id,
-            visibility=request.visibility,
-            allowed_user_ids=request.allowed_user_ids,
-            knowledge_dir=request.knowledge_dir,
-        )
-    except Exception as e:
-        logger.error("Git repository {} ingest failed: {}", request.repo_url, e)
-
-
-@router.post("/knowledge/git", response_model=Response[None])
+@router.post("/knowledge/git", response_model=Response[Dict[str, Any]])
 def ingest_git_knowledge(
     request: GitIngestRequest,
     background_tasks: BackgroundTasks,
-    knowledge_service: KnowledgeAppService = Depends(get_knowledge_service),
+    ingestion: IngestionPipeline = Depends(get_ingestion_pipeline),
     identity: RequestIdentity = Depends(require_admin),
 ):
     request.repo_url = validate_git_url(request.repo_url)
-    background_tasks.add_task(_background_git_ingest, request, knowledge_service, identity)
-    return Response.success(info="Git repository ingest task submitted")
+    ingest_request = IngestionRequest(
+        kind="git",
+        repo_url=request.repo_url,
+        branch=request.branch,
+        tag=request.knowledge_tag,
+        knowledge_dir=request.knowledge_dir,
+        visibility=request.visibility,
+        allowed_user_ids=request.allowed_user_ids,
+    )
+    job_id = ingestion.submit(ingest_request, identity)
+    background_tasks.add_task(ingestion.run, job_id, ingest_request, identity)
+    return Response.success(data={"job_id": job_id}, info="Git repository ingest task submitted")
 
 
 @router.get("/maintenance/redis", response_model=Response[List[Dict[str, Any]]])

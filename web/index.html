@@ -12,9 +12,9 @@
     <script src="https://cdn.jsdelivr.net/npm/marked-katex-extension/lib/index.umd.js"></script>
 
     <!-- Import modular CSS -->
-    <link rel="stylesheet" href="/css/variables.css">
-    <link rel="stylesheet" href="/css/layout.css">
-    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/variables.css?v=20260626-platform-human">
+    <link rel="stylesheet" href="/css/layout.css?v=20260626-platform-human">
+    <link rel="stylesheet" href="/css/components.css?v=20260626-platform-human">
 </head>
 <body>
 
@@ -141,6 +141,7 @@
 <div class="modal" id="maintenanceModal">
     <div class="modal-content">
         <div class="modal-header">系统维护</div>
+        <div id="platformOverview" class="platform-overview">加载中...</div>
         <div class="data-section">
             <h3>📊 知识库统计</h3>
             <div id="knowledgeStats">加载中...</div>
@@ -148,6 +149,171 @@
         <div class="data-section">
             <h3>💬 Redis 会话</h3>
             <div id="redisData">加载中...</div>
+        </div>
+        <div class="platform-console">
+            <div class="platform-card">
+                <div class="platform-card-header">
+                    <div>
+                        <div class="platform-title">🧭 意图树与路由</div>
+                        <div class="platform-subtitle">把用户问题路由到知识库、MCP 工具或系统指令。</div>
+                    </div>
+                    <span class="platform-pill">Intent</span>
+                </div>
+                <details class="platform-drawer">
+                    <summary>
+                        <span>＋ 新建路由节点</span>
+                        <small>配置 KB、MCP 或系统指令的命中规则</small>
+                    </summary>
+                    <div class="platform-form">
+                        <label class="platform-field">
+                            <span>意图名称</span>
+                            <input type="text" id="intentName" placeholder="例如：售后知识库">
+                        </label>
+                        <label class="platform-field">
+                            <span>类型</span>
+                            <select id="intentKind">
+                                <option value="KB">KB 知识库</option>
+                                <option value="MCP">MCP 工具</option>
+                                <option value="SYSTEM">SYSTEM 指令</option>
+                            </select>
+                        </label>
+                        <label class="platform-field wide">
+                            <span>关键词</span>
+                            <input type="text" id="intentKeywords" placeholder="多个关键词用逗号分隔">
+                        </label>
+                        <label class="platform-field">
+                            <span>KB Tag</span>
+                            <input type="text" id="intentKnowledgeTag" placeholder="如 support">
+                        </label>
+                        <label class="platform-field">
+                            <span>KB 目录</span>
+                            <input type="text" id="intentKnowledgeDir" placeholder="如 /support">
+                        </label>
+                        <label class="platform-field">
+                            <span>MCP Server</span>
+                            <input type="text" id="intentMcpServer" placeholder="如 local">
+                        </label>
+                        <label class="platform-field">
+                            <span>MCP Tool</span>
+                            <input type="text" id="intentMcpTool" placeholder="如 create_ticket">
+                        </label>
+                        <div class="platform-field action-field">
+                            <button class="btn-submit platform-primary" id="btnSaveIntent">保存意图</button>
+                        </div>
+                    </div>
+                </details>
+                <div class="platform-toolbar">
+                    <input type="text" id="intentClassifyQuery" placeholder="输入一句问题，测试当前意图路由">
+                    <button class="btn-submit" id="btnClassifyIntent">测试路由</button>
+                </div>
+                <div id="intentRouteResult" class="platform-pre compact"></div>
+                <div id="platformIntents" class="platform-list">加载中...</div>
+            </div>
+
+            <div class="platform-card">
+                <div class="platform-card-header">
+                    <div>
+                        <div class="platform-title">📚 知识目录</div>
+                        <div class="platform-subtitle">展示平台目录元数据；旧向量库数据会以兼容视图显示。</div>
+                    </div>
+                    <span class="platform-pill">Catalog</span>
+                </div>
+                <div id="platformKnowledgeCatalog" class="platform-list">加载中...</div>
+            </div>
+
+            <div class="platform-card">
+                <div class="platform-card-header">
+                    <div>
+                        <div class="platform-title">🧩 摄取任务节点日志</div>
+                        <div class="platform-subtitle">查看 validate / parse / chunk / enrich / index 的执行状态。</div>
+                    </div>
+                    <span class="platform-pill">Pipeline</span>
+                </div>
+                <div id="platformIngestionJobs" class="platform-list">加载中...</div>
+                <div class="platform-toolbar">
+                    <input type="text" id="nodeLogJobId" placeholder="输入 job_id 或点击上方任务编号">
+                    <button class="btn-submit" id="btnLoadNodeLogs">查看日志</button>
+                </div>
+                <div id="platformNodeLogs" class="platform-list"></div>
+            </div>
+
+            <div class="platform-card">
+                <div class="platform-card-header">
+                    <div>
+                        <div class="platform-title">🧾 Trace 与反馈</div>
+                        <div class="platform-subtitle">沉淀 bad case、人工评分和回归评测线索。</div>
+                    </div>
+                    <span class="platform-pill">Trace</span>
+                </div>
+                <div id="platformTraceSummary" class="platform-list">加载中...</div>
+                <details class="platform-drawer">
+                    <summary>
+                        <span>＋ 记录一次反馈</span>
+                        <small>给 Trace 打分，沉淀评测线索</small>
+                    </summary>
+                    <div class="platform-form">
+                        <label class="platform-field">
+                            <span>Trace ID</span>
+                            <input type="text" id="feedbackTraceId" placeholder="trace_id">
+                        </label>
+                        <label class="platform-field">
+                            <span>Session ID</span>
+                            <input type="text" id="feedbackSessionId" placeholder="session_id">
+                        </label>
+                        <label class="platform-field">
+                            <span>评分</span>
+                            <input type="number" id="feedbackRating" min="1" max="5" placeholder="1-5">
+                        </label>
+                        <label class="platform-field">
+                            <span>分类</span>
+                            <input type="text" id="feedbackCategory" placeholder="good / bad / ui">
+                        </label>
+                        <label class="platform-field wide">
+                            <span>备注</span>
+                            <input type="text" id="feedbackComment" placeholder="记录这次回答的问题或亮点">
+                        </label>
+                        <div class="platform-field action-field">
+                            <button class="btn-submit platform-primary" id="btnSaveFeedback">提交反馈</button>
+                        </div>
+                    </div>
+                </details>
+                <div id="platformTraceFeedback" class="platform-list">加载中...</div>
+            </div>
+
+            <div class="platform-card">
+                <div class="platform-card-header">
+                    <div>
+                        <div class="platform-title">🧠 模型路由</div>
+                        <div class="platform-subtitle">配置候选模型优先级，观察健康状态与降级原因。</div>
+                    </div>
+                    <span class="platform-pill">LLM</span>
+                </div>
+                <details class="platform-drawer">
+                    <summary>
+                        <span>＋ 添加候选模型</span>
+                        <small>仅添加真实可调用的模型名</small>
+                    </summary>
+                    <div class="platform-form compact-form">
+                        <label class="platform-field">
+                            <span>模型名</span>
+                            <input type="text" id="modelName" placeholder="例如 glm-5.1">
+                        </label>
+                        <label class="platform-field">
+                            <span>Provider</span>
+                            <input type="text" id="modelProvider" placeholder="可选">
+                        </label>
+                        <label class="platform-field small">
+                            <span>优先级</span>
+                            <input type="number" id="modelPriority" placeholder="0" value="0">
+                        </label>
+                        <label class="platform-checkbox pretty-check"><input type="checkbox" id="modelEnabled" checked> 启用</label>
+                        <div class="platform-field action-field">
+                            <button class="btn-submit platform-primary" id="btnSaveModel">保存模型</button>
+                        </div>
+                    </div>
+                </details>
+                <div id="platformModelRouting" class="platform-list">加载中...</div>
+            </div>
         </div>
         <div class="modal-actions">
             <button class="btn-cancel">关闭</button>
@@ -184,6 +350,6 @@
 </div>
 
 <!-- Load Main App Logic -->
-<script type="module" src="/js/app.js?v=20260626-typewriter"></script>
+<script type="module" src="/js/app.js?v=20260626-platform-human"></script>
 </body>
 </html>

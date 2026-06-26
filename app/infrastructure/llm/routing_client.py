@@ -10,6 +10,7 @@ from loguru import logger
 from app.core.config import settings
 from app.core.exceptions import LLMError
 from app.domain.agent.repository import ILLMClient
+from app.infrastructure.platform_store import PlatformStore
 
 
 @dataclass
@@ -22,8 +23,13 @@ class ModelHealth:
 class RoutingLLMClient(ILLMClient):
     """Model fallback with first-packet probing and an in-process circuit breaker."""
 
-    def __init__(self, delegate: ILLMClient):
+    def __init__(
+        self,
+        delegate: ILLMClient,
+        platform_store: PlatformStore | None = None,
+    ):
         self.delegate = delegate
+        self.platform_store = platform_store
         self._health: dict[str, ModelHealth] = {}
         self._lock = asyncio.Lock()
 
@@ -33,11 +39,7 @@ class RoutingLLMClient(ILLMClient):
         model: str = None,
         **kwargs,
     ) -> AsyncGenerator[str, None]:
-        candidates = (
-            list(dict.fromkeys([model, *settings.model_candidates]))
-            if model
-            else settings.model_candidates
-        )
+        candidates = self._model_candidates(model)
         last_error: Exception | None = None
 
         for candidate in candidates:
@@ -80,7 +82,7 @@ class RoutingLLMClient(ILLMClient):
                 )
 
             await stream.aclose()
-            await self._mark_failure(candidate)
+            await self._mark_failure(candidate, error)
             last_error = error
             logger.warning("模型失败，尝试降级: model={} error={}", candidate, error)
             if isinstance(error, LLMError) and not error.retryable:
@@ -102,11 +104,40 @@ class RoutingLLMClient(ILLMClient):
                 health.half_open_in_flight = True
             return True
 
+    def _model_candidates(self, requested_model: str | None) -> list[str]:
+        configured = []
+        if self.platform_store:
+            try:
+                configured = [
+                    item["model_name"]
+                    for item in self.platform_store.list_model_configs(enabled_only=True)
+                ]
+            except Exception as exc:
+                logger.warning("Failed to read model configs: {}", exc)
+
+        candidates = []
+        if requested_model:
+            candidates.append(requested_model)
+        candidates.extend(configured)
+        candidates.extend(settings.model_candidates)
+        return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
     async def _mark_success(self, model: str) -> None:
         async with self._lock:
             self._health[model] = ModelHealth()
+        if self.platform_store:
+            self.platform_store.record_model_health(
+                model_name=model,
+                state="healthy",
+                failures=0,
+                open_until=None,
+                success=True,
+            )
 
-    async def _mark_failure(self, model: str) -> None:
+    async def _mark_failure(self, model: str, error: Exception | None = None) -> None:
+        state = "degraded"
+        failures = 0
+        open_until = None
         async with self._lock:
             health = self._health.setdefault(model, ModelHealth())
             was_half_open = health.half_open_in_flight
@@ -116,11 +147,27 @@ class RoutingLLMClient(ILLMClient):
                 health.open_until = (
                     time.monotonic() + settings.LLM_CIRCUIT_OPEN_SECONDS
                 )
-                return
-            health.failures += 1
-            health.half_open_in_flight = False
-            if health.failures >= settings.LLM_FAILURE_THRESHOLD:
-                health.failures = 0
-                health.open_until = (
-                    time.monotonic() + settings.LLM_CIRCUIT_OPEN_SECONDS
-                )
+                state = "open"
+                failures = health.failures
+                open_until = time.time() + settings.LLM_CIRCUIT_OPEN_SECONDS
+            else:
+                health.failures += 1
+                health.half_open_in_flight = False
+                failures = health.failures
+                if health.failures >= settings.LLM_FAILURE_THRESHOLD:
+                    health.failures = 0
+                    health.open_until = (
+                        time.monotonic() + settings.LLM_CIRCUIT_OPEN_SECONDS
+                    )
+                    state = "open"
+                    open_until = time.time() + settings.LLM_CIRCUIT_OPEN_SECONDS
+
+        if self.platform_store:
+            self.platform_store.record_model_health(
+                model_name=model,
+                state=state,
+                failures=failures,
+                open_until=open_until,
+                last_error=str(error) if error else None,
+                success=False,
+            )

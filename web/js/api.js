@@ -1,5 +1,5 @@
-import { CONFIG } from './config.js';
-import { Toast } from './utils.js';
+import { CONFIG } from './config.js?v=20260626-platform-human';
+import { Toast } from './utils.js?v=20260626-platform-human';
 
 class ApiError extends Error {
     constructor(info, code) {
@@ -128,5 +128,38 @@ export const api = {
 
     // Maintenance APIs
     getKnowledgeStats: () => fetchWithHandler('/maintenance/knowledge'),
-    getRedisStats: () => fetchWithHandler('/maintenance/redis')
+    getRedisStats: () => fetchWithHandler('/maintenance/redis'),
+
+    // Platform APIs
+    listIntents: () => fetchWithHandler('/platform/intents?include_disabled=true'),
+    saveIntent: (payload) =>
+        fetchWithHandler('/platform/intents', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }),
+    classifyIntent: (query) =>
+        fetchWithHandler('/platform/intents/classify', {
+            method: 'POST',
+            body: JSON.stringify({ query })
+        }),
+    listKnowledgeBases: () => fetchWithHandler('/platform/knowledge/bases'),
+    listKnowledgeDocuments: (kbId = '') =>
+        fetchWithHandler(`/platform/knowledge/documents${kbId ? `?kb_id=${encodeURIComponent(kbId)}` : ''}`),
+    listIngestionJobs: () => fetchWithHandler('/ingestion/jobs'),
+    listIngestionNodeLogs: (jobId) =>
+        fetchWithHandler(`/platform/ingestion/jobs/${encodeURIComponent(jobId)}/nodes`),
+    getTraceSummary: () => fetchWithHandler('/observability/trace-summary'),
+    listTraceFeedback: () => fetchWithHandler('/platform/traces/feedback'),
+    addTraceFeedback: (payload) =>
+        fetchWithHandler('/platform/traces/feedback', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }),
+    listModelConfigs: () => fetchWithHandler('/platform/llm/models'),
+    saveModelConfig: (payload) =>
+        fetchWithHandler('/platform/llm/models', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }),
+    listModelHealth: () => fetchWithHandler('/platform/llm/health')
 };

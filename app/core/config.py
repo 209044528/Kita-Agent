@@ -38,7 +38,11 @@ class Settings(BaseSettings):
     OBSERVABILITY_ENABLED: bool = True
     TRACE_PATH: str = "logs/agent_traces.jsonl"
     BAD_CASE_PATH: str = "logs/bad_cases.jsonl"
+    PLATFORM_DB_PATH: str = "data/kita_platform.db"
     MCP_ENABLED: bool = False
+    MCP_CLIENT_SERVERS: str = ""
+    SUMMARY_TRIGGER_MESSAGES: int = 10
+    SUMMARY_KEEP_RECENT_MESSAGES: int = 6
 
     AUTH_ENABLED: bool = False
     AUTH_API_KEYS: str = ""
